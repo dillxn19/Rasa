@@ -36,7 +36,7 @@ export default function ActivityScreen() {
   });
 
   const markReadMutation = useMutation({
-    mutationFn: () => markNotificationsRead(profile!.id),
+    mutationFn: (ids?: string[]) => markNotificationsRead(profile!.id, ids),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.notifications(profile?.id ?? '') }),
   });
 
@@ -44,15 +44,13 @@ export default function ActivityScreen() {
   const unreadCount = data?.unread_count ?? 0;
 
   const handleNotificationPress = (notification: (typeof notifications)[0]) => {
-    // Mark as read
     if (!notification.is_read) {
-      markNotificationsRead(profile!.id, [notification.id]);
+      markReadMutation.mutate([notification.id]);
     }
-
-    // Navigate based on type
     const d = notification.data;
     if (d.restaurant_id) router.push(`/restaurant/${d.restaurant_id}`);
-    else if (d.follower_id) router.push(`/user/${d.follower_id}`);
+    else if (d.follower_id) router.push(`/user/${String(d.follower_id)}`);
+    else if (d.username) router.push(`/user/${String(d.username)}`);
   };
 
   return (
@@ -60,7 +58,7 @@ export default function ActivityScreen() {
       <View style={styles.header}>
         <RText variant="h3">Activity</RText>
         {unreadCount > 0 && (
-          <TouchableOpacity onPress={() => markReadMutation.mutate()}>
+          <TouchableOpacity onPress={() => markReadMutation.mutate(undefined)}>
             <RText variant="labelMedium" color={colors.primary}>Mark all read</RText>
           </TouchableOpacity>
         )}

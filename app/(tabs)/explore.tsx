@@ -90,7 +90,7 @@ export default function ExploreScreen() {
   const { data: searchResults, isLoading: isSearchLoading } = useQuery({
     queryKey: queryKeys.search(searchQuery),
     queryFn: () => multiSearch(searchQuery),
-    enabled: searchQuery.length >= 2 && activeTab !== 'dishes',
+    enabled: searchQuery.length >= 2,
   });
 
   const handleCancelSearch = () => {

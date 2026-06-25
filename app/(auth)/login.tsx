@@ -45,6 +45,24 @@ export default function LoginScreen() {
     }
   };
 
+  const handleForgotPassword = () => {
+    Alert.prompt(
+      'Reset Password',
+      'Enter your email address and we\'ll send you a reset link.',
+      async (inputEmail) => {
+        if (!inputEmail?.trim()) return;
+        const { error } = await supabase.auth.resetPasswordForEmail(inputEmail.trim());
+        if (error) {
+          Alert.alert('Error', error.message);
+        } else {
+          Alert.alert('Check your email', 'A password reset link has been sent.');
+        }
+      },
+      'plain-text',
+      email,
+    );
+  };
+
   const handleGoogleLogin = async () => {
     const { error } = await supabase.auth.signInWithOAuth({ provider: 'google' });
     if (error) Alert.alert('Error', error.message);
@@ -90,7 +108,7 @@ export default function LoginScreen() {
                 <RText variant="labelMedium" color={colors.textSecondary} style={styles.label}>
                   Password
                 </RText>
-                <TouchableOpacity>
+                <TouchableOpacity onPress={handleForgotPassword}>
                   <Caption color={colors.primary}>Forgot?</Caption>
                 </TouchableOpacity>
               </View>

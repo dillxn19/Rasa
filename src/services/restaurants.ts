@@ -191,7 +191,7 @@ export async function submitReview(form: ReviewForm): Promise<Review> {
   const { data, error } = await supabase
     .from('reviews')
     .upsert({
-      user_id: form.restaurant_id,
+      user_id: form.user_id,
       restaurant_id: form.restaurant_id,
       rating: form.rating,
       content: form.content,
@@ -206,7 +206,7 @@ export async function submitReview(form: ReviewForm): Promise<Review> {
   if (error) throw error;
 
   // Also log as a visit
-  await logVisit(form.restaurant_id, form.restaurant_id).catch(() => {});
+  await logVisit(form.user_id, form.restaurant_id).catch(() => {});
 
   return data as Review;
 }

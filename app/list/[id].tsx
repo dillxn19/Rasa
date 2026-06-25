@@ -13,51 +13,10 @@ import { colors, spacing, radius, shadows } from '@/theme';
 import { RText, H3, H4, Caption } from '@/components/ui/Text';
 import { Avatar } from '@/components/ui/Avatar';
 import { RestaurantCard } from '@/components/restaurants/RestaurantCard';
-import { supabase } from '@/lib/supabase';
 import { queryKeys } from '@/lib/queryClient';
 import { useAuthStore, selectCurrentUserId } from '@/stores/authStore';
-import type { List, ListItem } from '@/types';
-
-async function getListById(id: string, userId?: string): Promise<List | null> {
-  const { data, error } = await supabase
-    .from('lists')
-    .select(`
-      *,
-      user:users(*),
-      items:list_items(
-        *,
-        restaurant:restaurants(*)
-      )
-    `)
-    .eq('id', id)
-    .single();
-
-  if (error || !data) return null;
-
-  const list = data as List;
-  if (list.items) {
-    list.items = (list.items as ListItem[]).sort((a, b) => a.position - b.position);
-  }
-
-  if (!userId) return list;
-
-  const { data: followData } = await supabase
-    .from('list_follows')
-    .select('id')
-    .eq('user_id', userId)
-    .eq('list_id', id)
-    .maybeSingle();
-
-  return { ...list, is_following: !!followData };
-}
-
-async function followList(userId: string, listId: string) {
-  await supabase.from('list_follows').insert({ user_id: userId, list_id: listId });
-}
-
-async function unfollowList(userId: string, listId: string) {
-  await supabase.from('list_follows').delete().eq('user_id', userId).eq('list_id', listId);
-}
+import { getListById, followList, unfollowList } from '@/services/lists';
+import type { List } from '@/types';
 
 export default function ListScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();

@@ -6,6 +6,11 @@ import {
   TouchableOpacity,
   Dimensions,
   Linking,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -17,12 +22,13 @@ import * as Haptics from 'expo-haptics';
 import { colors, spacing, radius, shadows } from '@/theme';
 import { RText, H2, H3, H4, Body, Caption } from '@/components/ui/Text';
 import { Avatar } from '@/components/ui/Avatar';
-import { StarRating } from '@/components/ui/StarRating';
+import { StarRating, RatingPicker } from '@/components/ui/StarRating';
 import { Button } from '@/components/ui/Button';
 import { useAuthStore, selectCurrentUserId } from '@/stores/authStore';
 import {
   getRestaurantById, getRestaurantReviews, getRestaurantPhotos,
   getPopularDishes, getFriendReviews, saveRestaurant, unsaveRestaurant,
+  submitReview,
 } from '@/services/restaurants';
 import { getRestaurantFoodTags, toggleFoodTag } from '@/services/dishes';
 import { FoodTagList } from '@/components/ui/FoodTag';
@@ -41,6 +47,10 @@ export default function RestaurantScreen() {
   const userId = useAuthStore(selectCurrentUserId);
   const qc = useQueryClient();
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewText, setReviewText] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const { data: restaurant, isLoading } = useQuery({
     queryKey: queryKeys.restaurant(id),
@@ -128,6 +138,33 @@ export default function RestaurantScreen() {
       });
     } else if (restaurant.waze_url ?? restaurant.google_maps_url) {
       Linking.openURL((restaurant.waze_url ?? restaurant.google_maps_url)!);
+    }
+  };
+
+  const handleSubmitReview = async () => {
+    if (!profile || reviewRating === 0) {
+      Alert.alert('Rating required', 'Please select a star rating before submitting.');
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      await submitReview({
+        user_id: profile.id,
+        restaurant_id: id,
+        rating: reviewRating,
+        content: reviewText.trim() || undefined,
+        is_public: true,
+      });
+      qc.invalidateQueries({ queryKey: queryKeys.restaurantReviews(id) });
+      qc.invalidateQueries({ queryKey: queryKeys.restaurant(id) });
+      setShowRatingModal(false);
+      setReviewRating(0);
+      setReviewText('');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e) {
+      Alert.alert('Error', 'Failed to submit review. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -312,7 +349,7 @@ export default function RestaurantScreen() {
           <View style={styles.reviewCTA}>
             <Button
               label="Rate this restaurant"
-              onPress={() => router.push(`/review/new?restaurant=${id}`)}
+              onPress={() => setShowRatingModal(true)}
               fullWidth
               variant="primary"
               size="lg"
@@ -405,6 +442,55 @@ export default function RestaurantScreen() {
           </View>
         </View>
       </ScrollView>
+
+      {/* Inline rating modal */}
+      <Modal
+        visible={showRatingModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowRatingModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowRatingModal(false)}
+        >
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+            <TouchableOpacity activeOpacity={1}>
+              <View style={styles.modalSheet}>
+                <View style={styles.modalHandle} />
+                <H4 style={{ marginBottom: spacing[2] }}>Rate {restaurant.name}</H4>
+                <Caption color={colors.textSecondary} style={{ marginBottom: spacing[5] }}>
+                  How was your experience?
+                </Caption>
+                <RatingPicker
+                  value={reviewRating}
+                  onChange={setReviewRating}
+                  size={40}
+                />
+                <TextInput
+                  style={styles.reviewInput}
+                  placeholder="Share your thoughts... (optional)"
+                  placeholderTextColor={colors.textTertiary}
+                  value={reviewText}
+                  onChangeText={setReviewText}
+                  multiline
+                  maxLength={500}
+                  textAlignVertical="top"
+                />
+                <Button
+                  label={isSubmitting ? 'Posting...' : 'Post Review'}
+                  onPress={handleSubmitReview}
+                  fullWidth
+                  variant="primary"
+                  size="lg"
+                  isLoading={isSubmitting}
+                />
+              </View>
+            </TouchableOpacity>
+          </KeyboardAvoidingView>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -541,6 +627,39 @@ const styles = StyleSheet.create({
   reviewCTA: {
     paddingHorizontal: spacing[4],
     paddingVertical: spacing[4],
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalSheet: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: spacing[6],
+    paddingBottom: spacing[10],
+    alignItems: 'center',
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.gray300,
+    marginBottom: spacing[5],
+  },
+  reviewInput: {
+    width: '100%',
+    minHeight: 100,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.xl,
+    padding: spacing[4],
+    marginTop: spacing[5],
+    marginBottom: spacing[5],
+    fontSize: 16,
+    color: colors.textPrimary,
+    backgroundColor: colors.gray50,
   },
   tagsSection: {
     paddingTop: spacing[5],

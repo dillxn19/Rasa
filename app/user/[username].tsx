@@ -22,6 +22,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { getUserByUsername, getUserReviews, followUser, unfollowUser } from '@/services/users';
 import { queryKeys } from '@/lib/queryClient';
 import { TASTE_PROFILE_LABELS } from '@/types';
+import { shareViaWhatsApp } from '@/lib/share';
 
 export default function UserProfileScreen() {
   const { username } = useLocalSearchParams<{ username: string }>();
@@ -102,8 +103,11 @@ export default function UserProfileScreen() {
                   isLoading={followMutation.isPending}
                 />
                 {user.is_following && (
-                  <TouchableOpacity style={styles.messageBtn}>
-                    <Ionicons name="chatbubble-outline" size={20} color={colors.textPrimary} />
+                  <TouchableOpacity
+                    style={styles.messageBtn}
+                    onPress={() => shareViaWhatsApp(`Hey, check out ${user.display_name}'s food reviews on Rasa! rasa.my/user/${user.username}`)}
+                  >
+                    <RText style={{ fontSize: 18 }}>💬</RText>
                   </TouchableOpacity>
                 )}
               </View>

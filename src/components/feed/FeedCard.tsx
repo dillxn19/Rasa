@@ -4,7 +4,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   Dimensions,
-  Share,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -17,7 +16,8 @@ import { RText, Caption } from '@/components/ui/Text';
 import { Avatar } from '@/components/ui/Avatar';
 import { StarRating } from '@/components/ui/StarRating';
 import type { FeedItem } from '@/types';
-import { likeReview, unlikeReview } from '@/services/restaurants';
+import { likeReview, unlikeReview, saveRestaurant, unsaveRestaurant } from '@/services/restaurants';
+import { shareViaWhatsApp } from '@/lib/share';
 import { useAuthStore } from '@/stores/authStore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -33,6 +33,7 @@ export function FeedCard({ item, onLike }: FeedCardProps) {
   const { profile } = useAuthStore();
   const [isLiked, setIsLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(item.review?.like_count ?? 0);
+  const [isSaved, setIsSaved] = useState(false);
 
   const handleLike = async () => {
     if (!profile || !item.review) return;
@@ -58,10 +59,21 @@ export function FeedCard({ item, onLike }: FeedCardProps) {
 
   const handleShare = async () => {
     if (!item.restaurant) return;
-    await Share.share({
-      message: `Check out ${item.restaurant.name} on Rasa!`,
-      url: `https://rasa.app/restaurant/${item.restaurant.id}`,
-    });
+    const rating = item.review?.rating ? ` ⭐ ${item.review.rating}/5` : '';
+    await shareViaWhatsApp(`🍜 ${item.restaurant.name}${rating}\n${item.actor.display_name} reviewed this on Rasa!\nrasa.my/restaurant/${item.restaurant.id}`);
+  };
+
+  const handleSave = async () => {
+    if (!profile || !item.restaurant) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const newSaved = !isSaved;
+    setIsSaved(newSaved);
+    try {
+      if (newSaved) await saveRestaurant(profile.id, item.restaurant.id);
+      else await unsaveRestaurant(profile.id, item.restaurant.id);
+    } catch {
+      setIsSaved(!newSaved);
+    }
   };
 
   const navigateToRestaurant = () => {
@@ -80,8 +92,10 @@ export function FeedCard({ item, onLike }: FeedCardProps) {
       item={item}
       isLiked={isLiked}
       likeCount={likeCount}
+      isSaved={isSaved}
       onLike={handleLike}
       onShare={handleShare}
+      onSave={handleSave}
       onNavigateRestaurant={navigateToRestaurant}
       onNavigateUser={navigateToUser}
       timeAgo={timeAgo}
@@ -100,13 +114,15 @@ export function FeedCard({ item, onLike }: FeedCardProps) {
 }
 
 function ReviewFeedCard({
-  item, isLiked, likeCount, onLike, onShare, onNavigateRestaurant, onNavigateUser, timeAgo,
+  item, isLiked, likeCount, isSaved, onLike, onShare, onSave, onNavigateRestaurant, onNavigateUser, timeAgo,
 }: {
   item: FeedItem;
   isLiked: boolean;
   likeCount: number;
+  isSaved: boolean;
   onLike: () => void;
   onShare: () => void;
+  onSave: () => void;
   onNavigateRestaurant: () => void;
   onNavigateUser: () => void;
   timeAgo: string;
@@ -229,11 +245,15 @@ function ReviewFeedCard({
         <View style={{ flex: 1 }} />
 
         <TouchableOpacity style={styles.actionBtn} onPress={onShare} activeOpacity={0.7}>
-          <Ionicons name="arrow-redo-outline" size={20} color={colors.textSecondary} />
+          <RText style={{ fontSize: 16 }}>💬</RText>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionBtn} activeOpacity={0.7}>
-          <Ionicons name="bookmark-outline" size={20} color={colors.textSecondary} />
+        <TouchableOpacity style={styles.actionBtn} onPress={onSave} activeOpacity={0.7}>
+          <Ionicons
+            name={isSaved ? 'bookmark' : 'bookmark-outline'}
+            size={20}
+            color={isSaved ? colors.primary : colors.textSecondary}
+          />
         </TouchableOpacity>
       </View>
 
