@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import type { User, TasteMatch, FoodPassport, Badge, Review, Restaurant } from '@/types';
+import type { User, TasteMatch, FoodPassport, Badge, Review, Restaurant, List } from '@/types';
 
 export async function getUserByUsername(username: string, currentUserId?: string): Promise<User> {
   const { data, error } = await supabase
@@ -234,4 +234,15 @@ export async function checkUsernameAvailable(username: string): Promise<boolean>
     .eq('username', username.toLowerCase())
     .maybeSingle();
   return !data;
+}
+
+export async function getUserLists(userId: string): Promise<List[]> {
+  const { data, error } = await supabase
+    .from('lists')
+    .select('*, items:list_items(count)')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []) as List[];
 }

@@ -103,6 +103,11 @@ export default function HomeScreen() {
             </RText>
           </TouchableOpacity>
 
+          {/* Search */}
+          <TouchableOpacity style={styles.headerBtn} onPress={() => router.push('/search')}>
+            <Ionicons name="search-outline" size={22} color={colors.textPrimary} />
+          </TouchableOpacity>
+
           {/* Notifications */}
           <TouchableOpacity
             style={styles.headerBtn}

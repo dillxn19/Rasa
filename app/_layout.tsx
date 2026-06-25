@@ -46,6 +46,13 @@ export default function RootLayout() {
               }}
             />
             <Stack.Screen
+              name="search"
+              options={{
+                presentation: 'modal',
+                animation: 'fade',
+              }}
+            />
+            <Stack.Screen
               name="dish/[id]"
               options={{
                 presentation: 'card',
