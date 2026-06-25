@@ -15,6 +15,7 @@ import { StarRating } from '@/components/ui/StarRating';
 import { AvatarStack } from '@/components/ui/Avatar';
 import type { Restaurant, Review } from '@/types';
 import { CATEGORY_LABELS, DIETARY_LABELS, PRICE_LABELS } from '@/types';
+import { getOpenStatus } from '@/lib/openingHours';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -36,35 +37,27 @@ export function RestaurantCard({
   style,
 }: RestaurantCardProps) {
   const handlePress = () => {
-    if (onPress) {
-      onPress();
-    } else {
-      router.push(`/restaurant/${restaurant.slug ?? restaurant.id}`);
-    }
+    if (onPress) onPress();
+    else router.push(`/restaurant/${restaurant.slug ?? restaurant.id}`);
   };
 
+  const openStatus = getOpenStatus(restaurant.opening_hours);
+  const isHalal = restaurant.dietary_options.includes('halal_certified');
+  const isMuslimFriendly = !isHalal && restaurant.dietary_options.includes('muslim_friendly');
+
   return (
-    <TouchableOpacity
-      style={[styles.card, style]}
-      onPress={handlePress}
-      activeOpacity={0.92}
-    >
+    <TouchableOpacity style={[styles.card, style]} onPress={handlePress} activeOpacity={0.92}>
       {/* Photo */}
       <View style={styles.photoContainer}>
         {restaurant.cover_photo_url ? (
-          <Image
-            source={{ uri: restaurant.cover_photo_url }}
-            style={styles.photo}
-            contentFit="cover"
-            transition={250}
-          />
+          <Image source={{ uri: restaurant.cover_photo_url }} style={styles.photo} contentFit="cover" transition={250} />
         ) : (
           <View style={[styles.photo, styles.photoFallback]}>
             <Ionicons name="restaurant-outline" size={36} color={colors.gray300} />
           </View>
         )}
 
-        {/* Save button */}
+        {/* Save */}
         <TouchableOpacity style={styles.saveBtn}>
           <Ionicons
             name={restaurant.is_saved ? 'bookmark' : 'bookmark-outline'}
@@ -73,11 +66,11 @@ export function RestaurantCard({
           />
         </TouchableOpacity>
 
-        {/* Dietary badges */}
-        {restaurant.dietary_options.includes('halal_certified') && (
+        {/* Halal badge */}
+        {(isHalal || isMuslimFriendly) && (
           <View style={styles.halalBadge}>
-            <RText variant="caption" color={colors.halal} style={{ fontWeight: '700' }}>
-              HALAL
+            <RText variant="caption" color={colors.halal} style={{ fontWeight: '800' }}>
+              {isHalal ? 'HALAL' : 'MUSLIM OK'}
             </RText>
           </View>
         )}
@@ -86,19 +79,26 @@ export function RestaurantCard({
       {/* Content */}
       <View style={styles.content}>
         <View style={styles.nameRow}>
-          <RText variant="titleLarge" numberOfLines={1} style={{ flex: 1 }}>
-            {restaurant.name}
-          </RText>
-          <StarRating value={restaurant.overall_rating} size={13} readonly compact />
+          <RText variant="titleLarge" numberOfLines={1} style={{ flex: 1 }}>{restaurant.name}</RText>
+          <View style={styles.ratingPill}>
+            <RText style={{ fontSize: 12 }}>⭐</RText>
+            <RText variant="titleSmall" style={{ marginLeft: 3 }}>
+              {restaurant.overall_rating.toFixed(1)}
+            </RText>
+          </View>
         </View>
 
         <View style={styles.metaRow}>
-          <RText variant="bodySmall" color={colors.textSecondary} numberOfLines={1}>
-            {CATEGORY_LABELS[restaurant.category]} · {restaurant.area ?? restaurant.city}
+          <RText variant="bodySmall" color={colors.textSecondary} numberOfLines={1} style={{ flex: 1 }}>
+            {CATEGORY_LABELS[restaurant.category]} · {restaurant.area ?? restaurant.city} · {restaurant.price_range}
           </RText>
-          <RText variant="bodySmall" color={colors.textTertiary}>
-            {restaurant.price_range}
-          </RText>
+          {openStatus.isOpen !== null && (
+            <View style={[styles.openBadge, { borderColor: openStatus.color }]}>
+              <RText style={{ fontSize: 10, fontWeight: '700', color: openStatus.color }}>
+                {openStatus.label}
+              </RText>
+            </View>
+          )}
         </View>
 
         {/* Friend activity */}
@@ -111,7 +111,7 @@ export function RestaurantCard({
             />
             <Caption style={{ marginLeft: spacing[2] }}>
               {friendReviews.length === 1
-                ? `${friendReviews[0]!.user?.display_name?.split(' ')[0]} gave ${friendReviews[0]!.rating}★`
+                ? `${friendReviews[0]!.user?.display_name?.split(' ')[0]} rated ${friendReviews[0]!.rating}★`
                 : `${friendReviews.length} friends visited`}
             </Caption>
           </View>
@@ -284,10 +284,26 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: spacing[2],
   },
+  ratingPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.accentSurface,
+    paddingHorizontal: spacing[2],
+    paddingVertical: 3,
+    borderRadius: radius.full,
+  },
   metaRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: spacing[2],
+  },
+  openBadge: {
+    paddingHorizontal: spacing[2],
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexShrink: 0,
   },
   friendRow: {
     flexDirection: 'row',

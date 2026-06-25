@@ -5,7 +5,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Dimensions,
-  Share,
   Linking,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -30,6 +29,8 @@ import { FoodTagList } from '@/components/ui/FoodTag';
 import { queryKeys } from '@/lib/queryClient';
 import type { Review } from '@/types';
 import { CATEGORY_LABELS, DIETARY_LABELS, PRICE_LABELS, type FoodTagType } from '@/types';
+import { shareRestaurant, shareViaWhatsApp, getWazeUrl } from '@/lib/share';
+import { getOpenStatus } from '@/lib/openingHours';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const HEADER_HEIGHT = 300;
@@ -102,18 +103,31 @@ export default function RestaurantScreen() {
     },
   });
 
+  const openStatus = restaurant ? getOpenStatus(restaurant.opening_hours) : null;
+
   const handleShare = async () => {
-    await Share.share({
-      message: `Check out ${restaurant?.name} on Rasa! rasa.app/restaurant/${id}`,
-    });
+    if (!restaurant) return;
+    await shareRestaurant(id, restaurant.name);
+  };
+
+  const handleWhatsAppShare = async () => {
+    if (!restaurant) return;
+    await shareViaWhatsApp(`🍜 ${restaurant.name}\n⭐ ${restaurant.overall_rating.toFixed(1)} · ${restaurant.area ?? restaurant.city}\n\nCheck it out on Rasa: rasa.my/restaurant/${id}`);
   };
 
   const handleDirections = () => {
     if (!restaurant) return;
-    const url = restaurant.waze_url ?? restaurant.google_maps_url;
-    if (url) Linking.openURL(url);
-    else if (restaurant.latitude && restaurant.longitude) {
-      Linking.openURL(`https://maps.google.com/?q=${restaurant.latitude},${restaurant.longitude}`);
+    if (restaurant.latitude && restaurant.longitude) {
+      const wazeUrl = getWazeUrl(restaurant.latitude, restaurant.longitude);
+      Linking.canOpenURL(wazeUrl).then(can => {
+        if (can) Linking.openURL(wazeUrl);
+        else {
+          const url = restaurant.google_maps_url ?? `https://maps.google.com/?q=${restaurant.latitude},${restaurant.longitude}`;
+          Linking.openURL(url);
+        }
+      });
+    } else if (restaurant.waze_url ?? restaurant.google_maps_url) {
+      Linking.openURL((restaurant.waze_url ?? restaurant.google_maps_url)!);
     }
   };
 
@@ -219,6 +233,14 @@ export default function RestaurantScreen() {
               <RText variant="bodyMedium" color={colors.textSecondary}>
                 {restaurant.price_range}
               </RText>
+              {openStatus && openStatus.isOpen !== null && (
+                <>
+                  <View style={styles.separator} />
+                  <RText variant="bodyMedium" style={{ color: openStatus.color, fontWeight: '600' }}>
+                    {openStatus.label}
+                  </RText>
+                </>
+              )}
             </View>
 
             {/* Rating block */}
@@ -259,25 +281,29 @@ export default function RestaurantScreen() {
           {/* Quick actions */}
           <View style={styles.quickActions}>
             <TouchableOpacity style={styles.quickAction} onPress={handleDirections}>
-              <Ionicons name="navigate-outline" size={22} color={colors.primary} />
-              <RText variant="labelMedium" color={colors.primary}>Directions</RText>
+              <RText style={{ fontSize: 20 }}>🗺️</RText>
+              <RText variant="labelMedium" color={colors.textSecondary}>Waze</RText>
             </TouchableOpacity>
             {restaurant.phone_number && (
               <TouchableOpacity
                 style={styles.quickAction}
                 onPress={() => Linking.openURL(`tel:${restaurant.phone_number}`)}
               >
-                <Ionicons name="call-outline" size={22} color={colors.primary} />
-                <RText variant="labelMedium" color={colors.primary}>Call</RText>
+                <RText style={{ fontSize: 20 }}>📞</RText>
+                <RText variant="labelMedium" color={colors.textSecondary}>Call</RText>
               </TouchableOpacity>
             )}
+            <TouchableOpacity style={styles.quickAction} onPress={handleWhatsAppShare}>
+              <RText style={{ fontSize: 20 }}>💬</RText>
+              <RText variant="labelMedium" color={colors.textSecondary}>WhatsApp</RText>
+            </TouchableOpacity>
             {restaurant.website_url && (
               <TouchableOpacity
                 style={styles.quickAction}
                 onPress={() => Linking.openURL(restaurant.website_url!)}
               >
-                <Ionicons name="globe-outline" size={22} color={colors.primary} />
-                <RText variant="labelMedium" color={colors.primary}>Website</RText>
+                <RText style={{ fontSize: 20 }}>🌐</RText>
+                <RText variant="labelMedium" color={colors.textSecondary}>Website</RText>
               </TouchableOpacity>
             )}
           </View>
