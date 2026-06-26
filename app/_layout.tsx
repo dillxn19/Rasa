@@ -25,14 +25,35 @@ export default function RootLayout() {
             <Stack.Screen name="(auth)" />
             <Stack.Screen name="(tabs)" />
             <Stack.Screen
-              name="restaurant/[id]"
+              name="restaurant/[id]/index"
               options={{
                 presentation: 'card',
                 animation: 'slide_from_right',
               }}
             />
             <Stack.Screen
-              name="user/[username]"
+              name="restaurant/[id]/tags"
+              options={{
+                presentation: 'card',
+                animation: 'slide_from_right',
+              }}
+            />
+            <Stack.Screen
+              name="user/[username]/index"
+              options={{
+                presentation: 'card',
+                animation: 'slide_from_right',
+              }}
+            />
+            <Stack.Screen
+              name="user/[username]/followers"
+              options={{
+                presentation: 'card',
+                animation: 'slide_from_right',
+              }}
+            />
+            <Stack.Screen
+              name="user/[username]/following"
               options={{
                 presentation: 'card',
                 animation: 'slide_from_right',

@@ -16,7 +16,7 @@ import { colors, spacing, radius, shadows } from '@/theme';
 import { RText, Caption, H2, Body } from '@/components/ui/Text';
 import { Avatar } from '@/components/ui/Avatar';
 import { useAuthStore } from '@/stores/authStore';
-import { getUserBadges, getUserPassport, getUserReviews, getUserLists } from '@/services/users';
+import { getUserBadges, getUserPassport, getUserReviews, getUserLists, getTasteMatches } from '@/services/users';
 import { getSavedRestaurants } from '@/services/restaurants';
 import { getUserSavedDishes } from '@/services/dishes';
 import { queryKeys } from '@/lib/queryClient';
@@ -24,6 +24,7 @@ import { TASTE_PROFILE_LABELS, CUISINE_LABELS, DIETARY_LABELS } from '@/types';
 import type { Review, Badge, List } from '@/types';
 import { RestaurantCard } from '@/components/restaurants/RestaurantCard';
 import { DishChip } from '@/components/dishes/DishCard';
+import { TasteMatchCard } from '@/components/users/TasteMatchBadge';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -67,6 +68,13 @@ export default function ProfileScreen() {
     queryKey: queryKeys.userLists(profile?.id ?? ''),
     queryFn: () => getUserLists(profile!.id),
     enabled: !!profile && activeTab === 'lists',
+  });
+
+  const { data: tasteMatches } = useQuery({
+    queryKey: queryKeys.userTasteMatches(profile?.id ?? ''),
+    queryFn: () => getTasteMatches(profile!.id, 5),
+    enabled: !!profile,
+    staleTime: 1000 * 60 * 10,
   });
 
   if (!profile) return null;
@@ -199,6 +207,33 @@ export default function ProfileScreen() {
             </ScrollView>
           )}
         </View>
+
+        {/* Taste matches */}
+        {(tasteMatches ?? []).length > 0 && (
+          <View style={styles.matchesSection}>
+            <View style={styles.matchesHeader}>
+              <RText variant="labelMedium" color={colors.textTertiary} style={{ letterSpacing: 0.8 }}>
+                PEOPLE LIKE YOU
+              </RText>
+              <Caption color={colors.primary}>Based on taste</Caption>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.matchesRow}
+            >
+              {(tasteMatches ?? []).map(match => (
+                <View key={match.user.id} style={styles.matchCardWrapper}>
+                  <TasteMatchCard
+                    match={match}
+                    currentUserName={profile.display_name}
+                    onPress={() => router.push(`/user/${match.user.username}`)}
+                  />
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        )}
 
         {/* Tabs */}
         <View style={styles.tabs}>
@@ -591,6 +626,28 @@ const styles = StyleSheet.create({
     padding: spacing[4],
     gap: spacing[0.5],
   },
+  // Taste matches
+  matchesSection: {
+    paddingTop: spacing[4],
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  matchesHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: spacing[4],
+    marginBottom: spacing[3],
+  },
+  matchesRow: {
+    paddingHorizontal: spacing[4],
+    gap: spacing[3],
+    paddingBottom: spacing[4],
+  },
+  matchCardWrapper: {
+    width: 260,
+  },
+
   // Taste DNA
   tasteDNA: {
     marginHorizontal: spacing[4],
