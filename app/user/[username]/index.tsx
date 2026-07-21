@@ -18,6 +18,8 @@ import { RText, H3, Body, Caption } from '@/components/ui/Text';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { TasteMatchBadge } from '@/components/users/TasteMatchBadge';
+import { ReviewCard } from '@/components/profile/ReviewCard';
+import { SavedRestaurantCard } from '@/components/profile/SavedRestaurantCard';
 import { useAuthStore } from '@/stores/authStore';
 import { getUserByUsername, getUserReviews, followUser, unfollowUser } from '@/services/users';
 import { getSavedRestaurants } from '@/services/restaurants';
@@ -285,9 +287,11 @@ export default function UserProfileScreen() {
                 </Caption>
               </View>
             ) : (
-              filteredReviews.map(review => (
-                <ReviewRow key={review.id} review={review} />
-              ))
+              <View style={styles.reviewsList}>
+                {filteredReviews.map(review => (
+                  <ReviewCard key={review.id} review={review} />
+                ))}
+              </View>
             )}
           </View>
         )}
@@ -303,9 +307,11 @@ export default function UserProfileScreen() {
                 <Caption color={colors.textSecondary} style={{ marginTop: spacing[3] }}>No saved restaurants yet</Caption>
               </View>
             ) : (
-              saved.map(restaurant => (
-                <SavedRow key={restaurant.id} restaurant={restaurant} />
-              ))
+              <View style={styles.savedList}>
+                {saved.map(restaurant => (
+                  <SavedRestaurantCard key={restaurant.id} restaurant={restaurant} />
+                ))}
+              </View>
             )}
           </View>
         )}
@@ -313,69 +319,6 @@ export default function UserProfileScreen() {
         <View style={{ height: spacing[10] }} />
       </ScrollView>
     </View>
-  );
-}
-
-function ReviewRow({ review }: { review: Review }) {
-  return (
-    <TouchableOpacity
-      style={styles.reviewCard}
-      onPress={() => review.restaurant && router.push(`/restaurant/${review.restaurant.id}`)}
-      activeOpacity={0.85}
-    >
-      {review.restaurant?.cover_photo_url ? (
-        <Image source={{ uri: review.restaurant.cover_photo_url }} style={styles.reviewThumb} contentFit="cover" />
-      ) : (
-        <View style={[styles.reviewThumb, styles.reviewThumbFallback]}>
-          <Ionicons name="restaurant" size={18} color={colors.gray300} />
-        </View>
-      )}
-      <View style={{ flex: 1 }}>
-        <View style={styles.reviewHeader}>
-          <RText variant="titleSmall" numberOfLines={1} style={{ flex: 1 }}>{review.restaurant?.name}</RText>
-          <View style={styles.ratingPills}>
-            {'★★★★★'.split('').map((star, i) => (
-              <RText key={i} style={{ fontSize: 12, color: i < review.rating ? colors.starFilled : colors.gray200 }}>★</RText>
-            ))}
-          </View>
-        </View>
-        <Caption color={colors.textTertiary} numberOfLines={1}>
-          {CATEGORY_LABELS[review.restaurant?.category as keyof typeof CATEGORY_LABELS] ?? review.restaurant?.category}
-          {review.restaurant?.city ? ` · ${review.restaurant.city}` : ''}
-        </Caption>
-        {review.content ? (
-          <Body color={colors.textSecondary} numberOfLines={2} style={{ marginTop: spacing[1] }}>
-            {review.content}
-          </Body>
-        ) : null}
-      </View>
-    </TouchableOpacity>
-  );
-}
-
-function SavedRow({ restaurant }: { restaurant: Restaurant }) {
-  return (
-    <TouchableOpacity
-      style={styles.savedRow}
-      onPress={() => router.push(`/restaurant/${restaurant.id}`)}
-      activeOpacity={0.7}
-    >
-      {restaurant.cover_photo_url ? (
-        <Image source={{ uri: restaurant.cover_photo_url }} style={styles.savedThumb} contentFit="cover" />
-      ) : (
-        <View style={[styles.savedThumb, styles.savedThumbFallback]}>
-          <Ionicons name="restaurant" size={16} color={colors.gray300} />
-        </View>
-      )}
-      <View style={{ flex: 1 }}>
-        <RText variant="titleSmall" numberOfLines={1}>{restaurant.name}</RText>
-        <Caption numberOfLines={1}>
-          {CATEGORY_LABELS[restaurant.category as keyof typeof CATEGORY_LABELS] ?? restaurant.category}
-          {restaurant.city ? ` · ${restaurant.city}` : ''}
-        </Caption>
-      </View>
-      <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-    </TouchableOpacity>
   );
 }
 
@@ -519,48 +462,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing[8],
   },
 
-  // Review cards
-  reviewCard: {
-    flexDirection: 'row',
-    gap: spacing[3],
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[4],
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-    alignItems: 'flex-start',
-  },
-  reviewThumb: {
-    width: 56, height: 56,
-    borderRadius: radius.lg,
-    backgroundColor: colors.gray100,
-  },
-  reviewThumbFallback: {
-    alignItems: 'center', justifyContent: 'center',
-  },
-  reviewHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[2],
-    marginBottom: 2,
-  },
-  ratingPills: { flexDirection: 'row' },
-
-  // Saved rows
-  savedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[3],
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-    gap: spacing[3],
-  },
-  savedThumb: {
-    width: 48, height: 48,
-    borderRadius: radius.lg,
-    backgroundColor: colors.gray100,
-  },
-  savedThumbFallback: {
-    alignItems: 'center', justifyContent: 'center',
-  },
+  // Review + saved lists
+  reviewsList: { paddingHorizontal: spacing[4], paddingTop: spacing[2], gap: spacing[3] },
+  savedList: { paddingHorizontal: spacing[4], paddingTop: spacing[2], gap: spacing[3] },
 });

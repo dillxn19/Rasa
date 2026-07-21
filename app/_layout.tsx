@@ -72,13 +72,6 @@ export default function RootLayout() {
               }}
             />
             <Stack.Screen
-              name="search"
-              options={{
-                presentation: 'modal',
-                animation: 'fade',
-              }}
-            />
-            <Stack.Screen
               name="dish/[id]"
               options={{
                 presentation: 'card',
@@ -118,6 +111,27 @@ export default function RootLayout() {
               options={{
                 presentation: 'fullScreenModal',
                 animation: 'slide_from_bottom',
+              }}
+            />
+            <Stack.Screen
+              name="nearby"
+              options={{
+                presentation: 'card',
+                animation: 'slide_from_right',
+              }}
+            />
+            <Stack.Screen
+              name="taste-match"
+              options={{
+                presentation: 'card',
+                animation: 'slide_from_right',
+              }}
+            />
+            <Stack.Screen
+              name="taste-analytics"
+              options={{
+                presentation: 'card',
+                animation: 'slide_from_right',
               }}
             />
           </Stack>

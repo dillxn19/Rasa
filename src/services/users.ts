@@ -151,7 +151,7 @@ export async function getUserReviews(userId: string, page = 0): Promise<Review[]
     .select(`
       *,
       restaurant:restaurants!restaurant_id (
-        id, name, slug, cover_photo_url, category, city, overall_rating
+        id, name, slug, cover_photo_url, category, city, area, overall_rating, latitude, longitude
       )
     `)
     .eq('user_id', userId)
@@ -245,8 +245,10 @@ export async function getDiscoverUsers(currentUserId: string, limit = 40): Promi
       .eq('follower_id', currentUserId),
   ]);
 
+  // Keep people you already follow in the list (marked is_following) so you can
+  // still find them here — don't filter them out.
   const followingIds = new Set((followingData ?? []).map(f => f.following_id));
-  return ((users ?? []) as User[]).filter(u => !followingIds.has(u.id));
+  return ((users ?? []) as User[]).map(u => ({ ...u, is_following: followingIds.has(u.id) }));
 }
 
 export interface StreakResult {
@@ -356,6 +358,45 @@ export async function searchUsers(query: string, excludeId?: string, limit = 20)
 
   const results = (data ?? []) as User[];
   return excludeId ? results.filter(u => u.id !== excludeId) : results;
+}
+
+export interface TasteAnalytics {
+  total: number;
+  avgRating: number;
+  /** Counts per star bucket, index 0 = 1★ … 4 = 5★. */
+  distribution: number[];
+  topCategories: { key: string; count: number; avg: number }[];
+}
+
+/** Aggregates the user's whole review history into palate stats (taste_analytics). */
+export async function getTasteAnalytics(userId: string): Promise<TasteAnalytics> {
+  const { data } = await supabase
+    .from('reviews')
+    .select('rating, restaurant:restaurants!restaurant_id(category)')
+    .eq('user_id', userId);
+
+  const rows = (data ?? []) as { rating: number; restaurant: { category?: string } | null }[];
+  const total = rows.length;
+  const avgRating = total ? rows.reduce((s, r) => s + (r.rating ?? 0), 0) / total : 0;
+
+  const distribution = [0, 0, 0, 0, 0];
+  const catCount = new Map<string, number>();
+  const catSum = new Map<string, number>();
+  for (const r of rows) {
+    const bucket = Math.min(4, Math.max(0, Math.round(r.rating ?? 0) - 1));
+    distribution[bucket]++;
+    const cat = r.restaurant?.category;
+    if (cat) {
+      catCount.set(cat, (catCount.get(cat) ?? 0) + 1);
+      catSum.set(cat, (catSum.get(cat) ?? 0) + (r.rating ?? 0));
+    }
+  }
+  const topCategories = [...catCount.entries()]
+    .map(([key, count]) => ({ key, count, avg: (catSum.get(key) ?? 0) / count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 6);
+
+  return { total, avgRating, distribution, topCategories };
 }
 
 export async function getUserLists(userId: string): Promise<List[]> {

@@ -105,6 +105,21 @@ export default function ShopScreen() {
           <EarnChip emoji="⭐" label="5-week bonus" value="+100" />
         </View>
 
+        {/* Perks */}
+        <View style={styles.sectionHeader}>
+          <H3>Perks</H3>
+        </View>
+        <TouchableOpacity activeOpacity={0.9} onPress={() => router.push('/recap')} style={styles.perkCard}>
+          <LinearGradient colors={['#6D28D9', '#BE185D']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.perkInner}>
+            <View style={styles.perkIcon}><RText style={{ fontSize: 22, lineHeight: 28 }}>✨</RText></View>
+            <View style={{ flex: 1 }}>
+              <RText variant="titleMedium" color={colors.white}>Monthly Recap</RText>
+              <Caption color={colors.whiteTransparent90}>Your shareable food wrapped — view & share</Caption>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.white} />
+          </LinearGradient>
+        </TouchableOpacity>
+
         {/* Themes */}
         <View style={styles.sectionHeader}>
           <H3>App Themes</H3>
@@ -272,6 +287,27 @@ const styles = StyleSheet.create({
     gap: 2,
   },
 
+  perkCard: {
+    marginHorizontal: spacing[4],
+    marginBottom: spacing[5],
+    borderRadius: radius.xl,
+    overflow: 'hidden',
+    ...(shadows.sm as object),
+  },
+  perkInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing[4],
+    gap: spacing[3],
+  },
+  perkIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

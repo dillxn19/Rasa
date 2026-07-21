@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   View,
   StyleSheet,
@@ -7,6 +7,7 @@ import {
   Dimensions,
   Modal,
 } from 'react-native';
+import { useScrollToTop } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -27,12 +28,16 @@ import { getReferralStats } from '@/services/referrals';
 import { shareInvite } from '@/lib/referral';
 import { FeatureGateModal } from '@/components/ui/FeatureGateModal';
 import { toast } from '@/stores/toastStore';
+import { useUserLocation } from '@/hooks/useUserLocation';
+import { distanceKm, formatDistance, type Coords } from '@/lib/geo';
 import { queryKeys } from '@/lib/queryClient';
 import { TASTE_PROFILE_LABELS, CUISINE_LABELS, DIETARY_LABELS, CATEGORY_LABELS } from '@/types';
 import type { Review, Badge, List } from '@/types';
 import { RestaurantCard } from '@/components/restaurants/RestaurantCard';
 import { DishChip } from '@/components/dishes/DishCard';
 import { TasteMatchCard } from '@/components/users/TasteMatchBadge';
+import { ScoreBadge, ReviewCard } from '@/components/profile/ReviewCard';
+import { SavedRestaurantCard } from '@/components/profile/SavedRestaurantCard';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -41,12 +46,18 @@ type TabKey = 'reviews' | 'rankings' | 'saved' | 'lists' | 'passport';
 export default function ProfileScreen() {
   const { profile, signOut } = useAuthStore();
   const qc = useQueryClient();
+  const location = useUserLocation();
+  const scrollRef = useRef<ScrollView>(null);
+  // Re-pressing the Profile tab while it's focused scrolls back to the top.
+  useScrollToTop(scrollRef);
 
   // On focus, refresh the canonical currentUser resource (mirrored into the auth
   // store by useCurrentUserSync) plus this user's sub-resources. Catches changes
   // made elsewhere — follows, edits, reviews — without per-mutation wiring.
   useFocusEffect(
     useCallback(() => {
+      // Returning to the Profile tab resets it to the top.
+      scrollRef.current?.scrollTo({ y: 0, animated: false });
       const uid = useAuthStore.getState().profile?.id;
       if (!uid) return;
       qc.invalidateQueries({ queryKey: queryKeys.currentUser() });
@@ -72,9 +83,11 @@ export default function ProfileScreen() {
 
   const openFeature = (featureId: string) => {
     setShowSettings(false);
+    // Monthly Recap is free & shareable (it's the growth loop) — never gate it.
+    if (featureId === 'monthly_recap') { router.push('/recap'); return; }
     const feature = FEATURES[featureId];
     if (isUnlocked(featureId)) {
-      if (featureId === 'monthly_recap') router.push('/recap');
+      if (featureId === 'taste_analytics') router.push('/taste-analytics');
       else toast.info(`${feature.name} — coming soon!`);
     } else {
       setGate(feature);
@@ -144,18 +157,20 @@ export default function ProfileScreen() {
     staleTime: 1000 * 60 * 10,
   });
 
-  if (!profile) return null;
-
-  const tasteProfile = profile.taste_profile
-    ? TASTE_PROFILE_LABELS[profile.taste_profile]
-    : null;
-
+  // Keep ALL hooks above the early return — otherwise signing out (profile → null)
+  // drops a hook and crashes with "rendered fewer hooks than expected".
   const { data: userCoins = 0 } = useQuery({
     queryKey: ['userCoins', profile?.id],
     queryFn: () => getUserCoins(profile!.id),
     enabled: !!profile,
     staleTime: 1000 * 30,
   });
+
+  if (!profile) return null;
+
+  const tasteProfile = profile.taste_profile
+    ? TASTE_PROFILE_LABELS[profile.taste_profile]
+    : null;
 
   const theme = getProfileTheme(profile.active_theme as string | undefined);
 
@@ -169,7 +184,7 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}>
         {/* Cover + Header */}
         <View style={styles.coverContainer}>
           {profile.cover_url ? (
@@ -277,6 +292,10 @@ export default function ProfileScreen() {
           {/* Weekly streak card */}
           <StreakCard weeks={passport?.streak_days ?? 0} />
 
+          {/* Monthly recap entry */}
+          <RecapCard />
+
+
           {/* Badges preview */}
           {(badges?.length ?? 0) > 0 && (
             <ScrollView
@@ -307,7 +326,9 @@ export default function ProfileScreen() {
               <RText variant="labelMedium" color={colors.textTertiary} style={{ letterSpacing: 0.8 }}>
                 PEOPLE LIKE YOU
               </RText>
-              <Caption color={colors.primary}>Based on taste</Caption>
+              <TouchableOpacity onPress={() => router.push('/taste-match')}>
+                <Caption color={colors.primary}>See all →</Caption>
+              </TouchableOpacity>
             </View>
             <ScrollView
               horizontal
@@ -365,17 +386,16 @@ export default function ProfileScreen() {
             <ReviewsList reviews={reviews ?? []} />
           )}
           {activeTab === 'rankings' && (
-            <RankingsTab reviews={reviews ?? []} userId={profile.id} />
+            <RankingsTab reviews={reviews ?? []} userId={profile.id} location={location} />
           )}
           {activeTab === 'saved' && (
             <SavedTab
               restaurants={savedRestaurants ?? []}
               dishes={savedDishes ?? []}
+              location={location}
             />
           )}
-          {activeTab === 'lists' && (
-            <ListsTab lists={userLists ?? []} />
-          )}
+          {activeTab === 'lists' && <ListsTab />}
           {activeTab === 'passport' && (
             <PassportView
               passport={passport}
@@ -410,12 +430,6 @@ export default function ProfileScreen() {
                   : 'Earn 🪙 and unlock features — refer a friend'
               }
               onPress={() => { setShowSettings(false); handleInvite(); }}
-            />
-            <SettingsItem
-              icon="sparkles-outline"
-              label="Monthly Recap"
-              sublabel={isUnlocked('monthly_recap') ? 'Unlocked' : 'Refer 3 friends or 800 🪙'}
-              onPress={() => openFeature('monthly_recap')}
             />
             <SettingsItem
               icon="stats-chart-outline"
@@ -469,36 +483,7 @@ function ReviewsList({ reviews }: { reviews: Review[] }) {
   return (
     <View style={styles.reviewsList}>
       {reviews.map(review => (
-        <TouchableOpacity
-          key={review.id}
-          style={styles.reviewItem}
-          onPress={() => review.restaurant && router.push(`/restaurant/${review.restaurant.id}`)}
-          activeOpacity={0.85}
-        >
-          {review.restaurant?.cover_photo_url && (
-            <Image
-              source={{ uri: review.restaurant.cover_photo_url }}
-              style={styles.reviewPhoto}
-              contentFit="cover"
-            />
-          )}
-          <View style={styles.reviewInfo}>
-            <RText variant="titleSmall" numberOfLines={1}>
-              {review.restaurant?.name}
-            </RText>
-            <View style={styles.reviewRatingRow}>
-              <RText variant="labelMedium" color={colors.starFilled}>
-                {'★'.repeat(Math.round(review.rating))}
-              </RText>
-              <RText variant="caption" color={colors.textTertiary} style={{ marginLeft: spacing[2] }}>
-                {review.rating}/5
-              </RText>
-            </View>
-            {review.content && (
-              <Caption numberOfLines={2}>{review.content}</Caption>
-            )}
-          </View>
-        </TouchableOpacity>
+        <ReviewCard key={review.id} review={review} />
       ))}
     </View>
   );
@@ -596,6 +581,30 @@ function StreakCard({ weeks }: { weeks: number }) {
   );
 }
 
+// Monthly recap entry point on the profile.
+function RecapCard() {
+  const month = new Date().toLocaleString('en-US', { month: 'long' });
+  return (
+    <TouchableOpacity activeOpacity={0.9} onPress={() => router.push('/recap')} style={{ marginBottom: spacing[4] }}>
+      <LinearGradient
+        colors={['#6D28D9', '#BE185D']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.recapCard}
+      >
+        <View style={styles.recapIcon}>
+          <RText style={{ fontSize: 22, lineHeight: 28 }}>✨</RText>
+        </View>
+        <View style={{ flex: 1 }}>
+          <RText variant="titleMedium" color={colors.white}>Your {month} Recap</RText>
+          <Caption color={colors.whiteTransparent90}>Tap to view & share your food story</Caption>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={colors.white} />
+      </LinearGradient>
+    </TouchableOpacity>
+  );
+}
+
 function SettingsItem({
   icon, label, sublabel, onPress, destructive,
 }: {
@@ -661,16 +670,80 @@ const FILTER_MAP: Record<string, string[]> = {
   street: ['night_market'],
 };
 
-function RankingsTab({ reviews, userId }: { reviews: Review[]; userId: string }) {
-  const [filter, setFilter] = useState('all');
+type LocationHook = ReturnType<typeof useUserLocation>;
+type SortMode = 'score' | 'distance';
 
-  const sorted = [...reviews]
-    .filter(r => {
-      if (filter === 'all') return true;
-      const cats = FILTER_MAP[filter] ?? [];
-      return cats.includes((r as any).restaurant?.category ?? '');
-    })
-    .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+// Shared Score ⇄ Distance toggle. Tapping "Distance" lazily requests location;
+// if denied we fall back to score and tell the user.
+function useSortMode(location: LocationHook) {
+  const [mode, setMode] = useState<SortMode>('score');
+  const chooseScore = () => setMode('score');
+  const chooseDistance = async () => {
+    const coords = await location.request();
+    if (coords) setMode('distance');
+    else { setMode('score'); toast.info('Enable location access to sort by distance.'); }
+  };
+  return { mode, chooseScore, chooseDistance, coords: location.coords };
+}
+
+function SortChips({ mode, onScore, onDistance }: {
+  mode: SortMode; onScore: () => void; onDistance: () => void;
+}) {
+  return (
+    <View style={styles.sortRow}>
+      <TouchableOpacity
+        style={[styles.sortChip, mode === 'score' && styles.sortChipActive]}
+        onPress={onScore}
+        activeOpacity={0.8}
+      >
+        <Ionicons name="star" size={12} color={mode === 'score' ? colors.white : colors.textSecondary} />
+        <RText variant="labelSmall" color={mode === 'score' ? colors.white : colors.textSecondary} style={{ marginLeft: 4 }}>
+          Score
+        </RText>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.sortChip, mode === 'distance' && styles.sortChipActive]}
+        onPress={onDistance}
+        activeOpacity={0.8}
+      >
+        <Ionicons name="navigate" size={12} color={mode === 'distance' ? colors.white : colors.textSecondary} />
+        <RText variant="labelSmall" color={mode === 'distance' ? colors.white : colors.textSecondary} style={{ marginLeft: 4 }}>
+          Distance
+        </RText>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+/** Sort by distance from `coords`; entries missing coordinates sink to the end. */
+function byDistance<T>(items: T[], coords: Coords, getLL: (t: T) => { lat?: number | null; lng?: number | null }) {
+  return [...items].sort((a, b) => {
+    const la = getLL(a); const lb = getLL(b);
+    const da = la.lat != null && la.lng != null ? distanceKm(coords, { lat: la.lat, lng: la.lng }) : Infinity;
+    const db = lb.lat != null && lb.lng != null ? distanceKm(coords, { lat: lb.lat, lng: lb.lng }) : Infinity;
+    return da - db;
+  });
+}
+
+function RankingsTab({ reviews, userId, location }: { reviews: Review[]; userId: string; location: LocationHook }) {
+  const [filter, setFilter] = useState('all');
+  const { mode, chooseScore, chooseDistance, coords } = useSortMode(location);
+
+  const filtered = reviews.filter(r => {
+    if (filter === 'all') return true;
+    const cats = FILTER_MAP[filter] ?? [];
+    return cats.includes((r as any).restaurant?.category ?? '');
+  });
+
+  // Rank position is always by score (Beli-style), even when sorted by distance.
+  const rankOf = new Map(
+    [...filtered].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0)).map((r, i) => [r.id, i + 1]),
+  );
+
+  const sorted =
+    mode === 'distance' && coords
+      ? byDistance(filtered, coords, r => ({ lat: r.restaurant?.latitude, lng: r.restaurant?.longitude }))
+      : [...filtered].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
 
   return (
     <View style={{ paddingTop: spacing[2] }}>
@@ -690,6 +763,11 @@ function RankingsTab({ reviews, userId }: { reviews: Review[]; userId: string })
         ))}
       </ScrollView>
 
+      {/* Sort control */}
+      <View style={styles.sortBar}>
+        <SortChips mode={mode} onScore={chooseScore} onDistance={chooseDistance} />
+      </View>
+
       {/* Empty state or ranked list */}
       {sorted.length === 0 ? (
         <View style={styles.emptyTab}>
@@ -701,33 +779,44 @@ function RankingsTab({ reviews, userId }: { reviews: Review[]; userId: string })
             {filter === 'all' ? 'Rate restaurants to build your personal rankings' : 'Try a different category'}
           </Caption>
         </View>
-      ) : sorted.map((review, index) => (
-        <TouchableOpacity
-          key={review.id}
-          style={styles.rankRow}
-          onPress={() => router.push(`/restaurant/${review.restaurant_id}` as any)}
-        >
-          <RText style={styles.rankNum}>#{index + 1}</RText>
-          <View style={styles.rankBadge}>
-            <RText style={styles.rankStar}>★</RText>
-            <RText style={styles.rankScore}>{review.rating?.toFixed(1)}</RText>
-          </View>
-          <View style={{ flex: 1 }}>
-            <RText variant="titleSmall" numberOfLines={1}>
-              {(review as any).restaurant?.name ?? 'Restaurant'}
-            </RText>
-            {review.content ? (
-              <Caption numberOfLines={1} color={colors.textSecondary}>{review.content}</Caption>
-            ) : null}
-          </View>
-          <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-        </TouchableOpacity>
-      ))}
+      ) : sorted.map((review) => {
+        const r = review.restaurant as any;
+        const dist = formatDistance(coords, r?.latitude, r?.longitude);
+        const meta = [
+          r?.category ? (CATEGORY_LABELS[r.category as keyof typeof CATEGORY_LABELS] ?? r.category) : null,
+          r?.area ?? r?.city,
+          dist,
+        ].filter(Boolean).join(' · ');
+
+        return (
+          <TouchableOpacity
+            key={review.id}
+            style={styles.rankRow}
+            onPress={() => router.push(`/restaurant/${review.restaurant_id}` as any)}
+            activeOpacity={0.85}
+          >
+            <ScoreBadge rating={review.rating} size={48} />
+            <View style={styles.rankInfo}>
+              <View style={styles.rankNameRow}>
+                <RText variant="titleLarge" numberOfLines={1} style={{ flex: 1 }}>
+                  {r?.name ?? 'Restaurant'}
+                </RText>
+                <RText style={styles.rankPos}>#{rankOf.get(review.id) ?? '—'}</RText>
+              </View>
+              {meta ? (
+                <Caption color={colors.textTertiary} numberOfLines={1} style={{ marginTop: 2 }}>{meta}</Caption>
+              ) : null}
+            </View>
+          </TouchableOpacity>
+        );
+      })}
     </View>
   );
 }
 
-function SavedTab({ restaurants, dishes }: { restaurants: any[]; dishes: any[] }) {
+function SavedTab({ restaurants, dishes, location }: { restaurants: any[]; dishes: any[]; location: LocationHook }) {
+  const { mode, chooseScore, chooseDistance, coords } = useSortMode(location);
+
   if (restaurants.length === 0 && dishes.length === 0) {
     return (
       <View style={styles.emptyTab}>
@@ -738,36 +827,30 @@ function SavedTab({ restaurants, dishes }: { restaurants: any[]; dishes: any[] }
     );
   }
 
+  const sortedRestaurants =
+    mode === 'distance' && coords
+      ? byDistance(restaurants, coords, r => ({ lat: r.latitude, lng: r.longitude }))
+      : [...restaurants].sort((a, b) => (b.overall_rating ?? 0) - (a.overall_rating ?? 0));
+
   return (
     <View style={{ paddingTop: spacing[2] }}>
       {restaurants.length > 0 && (
         <View style={{ marginBottom: spacing[4] }}>
-          <RText variant="labelMedium" color={colors.textTertiary} style={styles.visitedSectionLabel}>
-            WANT TO TRY
-          </RText>
-          {restaurants.map(r => (
-            <TouchableOpacity
-              key={r.id}
-              style={styles.savedRow}
-              onPress={() => router.push(`/restaurant/${r.id}` as any)}
-              activeOpacity={0.7}
-            >
-              {r.cover_photo_url ? (
-                <Image source={{ uri: r.cover_photo_url }} style={styles.savedThumb} contentFit="cover" />
-              ) : (
-                <View style={[styles.savedThumb, styles.savedThumbFallback]}>
-                  <Ionicons name="restaurant" size={18} color={colors.gray300} />
-                </View>
-              )}
-              <View style={{ flex: 1 }}>
-                <RText variant="titleSmall" numberOfLines={1}>{r.name}</RText>
-                <Caption numberOfLines={1}>
-                  {CATEGORY_LABELS[r.category as keyof typeof CATEGORY_LABELS] ?? r.category} · {r.area ?? r.city}
-                </Caption>
-              </View>
-              <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-            </TouchableOpacity>
-          ))}
+          <View style={styles.savedHeaderRow}>
+            <RText variant="labelMedium" color={colors.textTertiary} style={styles.visitedSectionLabel}>
+              WANT TO TRY · {restaurants.length}
+            </RText>
+            <SortChips mode={mode} onScore={chooseScore} onDistance={chooseDistance} />
+          </View>
+          <View style={styles.savedList}>
+            {sortedRestaurants.map(r => (
+              <SavedRestaurantCard
+                key={r.id}
+                restaurant={r}
+                distance={mode === 'distance' ? formatDistance(coords, r.latitude, r.longitude) : null}
+              />
+            ))}
+          </View>
         </View>
       )}
 
@@ -791,42 +874,27 @@ function SavedTab({ restaurants, dishes }: { restaurants: any[]; dishes: any[] }
   );
 }
 
-function ListsTab({ lists }: { lists: List[] }) {
-  if (lists.length === 0) {
-    return (
-      <View style={styles.emptyTab}>
-        <RText style={{ fontSize: 32, lineHeight: 42 }}>📋</RText>
-        <RText variant="titleMedium" style={{ marginTop: spacing[3] }}>No lists yet</RText>
-        <Caption color={colors.textSecondary}>Create lists to curate your favourite spots</Caption>
-      </View>
-    );
-  }
-
+// Lists are not shipped yet — surfaced as a "coming soon" teaser so users know
+// what Custom Lists will be.
+function ListsTab() {
   return (
-    <View style={styles.listsGrid}>
-      {lists.map(list => (
-        <TouchableOpacity
-          key={list.id}
-          style={styles.listCard}
-          onPress={() => router.push(`/list/${list.id}`)}
-          activeOpacity={0.85}
-        >
-          {list.cover_url ? (
-            <Image source={{ uri: list.cover_url }} style={styles.listCover} contentFit="cover" />
-          ) : (
-            <LinearGradient
-              colors={[colors.primary, colors.accent]}
-              style={styles.listCover}
-            />
-          )}
-          <View style={styles.listCardBody}>
-            <RText variant="titleSmall" numberOfLines={2}>{list.name}</RText>
-            <Caption color={colors.textTertiary} style={{ marginTop: spacing[1] }}>
-              {list.is_public ? '🌐 Public' : '🔒 Private'}
-            </Caption>
-          </View>
-        </TouchableOpacity>
-      ))}
+    <View style={styles.comingSoon}>
+      <LinearGradient
+        colors={[colors.primary, colors.accent]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.comingSoonIcon}
+      >
+        <Ionicons name="list" size={30} color={colors.white} />
+      </LinearGradient>
+      <View style={styles.comingSoonBadge}>
+        <RText variant="labelSmall" color={colors.primary} style={{ letterSpacing: 1 }}>COMING SOON</RText>
+      </View>
+      <RText variant="titleLarge" style={{ marginTop: spacing[3] }}>Custom Lists</RText>
+      <Caption color={colors.textSecondary} align="center" style={{ marginTop: spacing[2], maxWidth: 300, lineHeight: 20 }}>
+        Curate and share your own themed collections — “Best Nasi Lemak in KL”, “Date Night Spots”,
+        weekend food trips. Save places into lists and share them with friends.
+      </Caption>
     </View>
   );
 }
@@ -911,6 +979,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   streakNum: { fontSize: 30, lineHeight: 36, fontWeight: '800' },
+  // Recap entry card
+  recapCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: radius.xl,
+    padding: spacing[4],
+    gap: spacing[3],
+  },
+  recapIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   streakTrack: {
     height: 6,
     borderRadius: 3,
@@ -996,21 +1080,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing[16],
     gap: spacing[2],
   },
-  reviewsList: { paddingHorizontal: spacing[4] },
-  reviewItem: {
-    flexDirection: 'row',
-    paddingVertical: spacing[4],
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-    gap: spacing[3],
-  },
-  reviewPhoto: {
-    width: 72,
-    height: 72,
-    borderRadius: radius.xl,
-  },
-  reviewInfo: { flex: 1, gap: spacing[1] },
-  reviewRatingRow: { flexDirection: 'row', alignItems: 'center' },
+  reviewsList: { paddingHorizontal: spacing[4], paddingTop: spacing[2], gap: spacing[3] },
   passport: { paddingHorizontal: spacing[4], paddingTop: spacing[4] },
   passportStats: {
     flexDirection: 'row',
@@ -1097,52 +1167,47 @@ const styles = StyleSheet.create({
   rankRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    height: 76,
     paddingHorizontal: spacing[4],
-    paddingVertical: spacing[3],
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
-    gap: spacing[3],
   },
-  rankNum: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.textTertiary,
-    width: 28,
+  rankInfo: { flex: 1, marginLeft: spacing[3], justifyContent: 'center' },
+  rankNameRow: { flexDirection: 'row', alignItems: 'center', gap: spacing[2] },
+  rankPos: { fontSize: 13, fontWeight: '800', color: colors.textTertiary },
+
+  // Sort control
+  sortBar: {
+    paddingHorizontal: spacing[4],
+    paddingBottom: spacing[3],
+    alignItems: 'flex-start',
   },
-  rankBadge: {
+  sortRow: {
+    flexDirection: 'row',
+    backgroundColor: colors.gray100,
+    borderRadius: radius.full,
+    padding: 2,
+  },
+  sortChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.primarySurface,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing[2],
-    paddingVertical: spacing[1],
-    gap: 2,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[1] + 1,
+    borderRadius: radius.full,
   },
-  rankStar: { fontSize: 11, color: colors.primary },
-  rankScore: { fontSize: 13, fontWeight: '700', color: colors.primary },
+  sortChipActive: { backgroundColor: colors.textPrimary },
+
+  savedHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingRight: spacing[4],
+  },
+  savedList: { paddingHorizontal: spacing[4], gap: spacing[3] },
   visitedSectionLabel: {
     letterSpacing: 0.8,
     marginBottom: spacing[3],
     paddingHorizontal: spacing[4],
-  },
-  savedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[3],
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-    gap: spacing[3],
-  },
-  savedThumb: {
-    width: 48,
-    height: 48,
-    borderRadius: radius.md,
-  },
-  savedThumbFallback: {
-    backgroundColor: colors.gray100,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   dishesRow: {
     paddingHorizontal: spacing[4],
@@ -1150,26 +1215,27 @@ const styles = StyleSheet.create({
     paddingBottom: spacing[4],
   },
 
-  // Lists tab
-  listsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    padding: spacing[4],
-    gap: spacing[3],
+  // Lists tab — coming soon
+  comingSoon: {
+    alignItems: 'center',
+    paddingTop: spacing[12],
+    paddingBottom: spacing[16],
+    paddingHorizontal: spacing[8],
   },
-  listCard: {
-    width: CARD_SIZE,
-    borderRadius: radius.xl,
-    overflow: 'hidden',
-    backgroundColor: colors.surface,
-    ...(shadows.xs as object),
+  comingSoonIcon: {
+    width: 68,
+    height: 68,
+    borderRadius: radius['2xl'],
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...(shadows.md as object),
   },
-  listCover: {
-    width: '100%',
-    height: 100,
-  },
-  listCardBody: {
-    padding: spacing[3],
+  comingSoonBadge: {
+    marginTop: spacing[4],
+    backgroundColor: colors.primarySurface,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[1],
+    borderRadius: radius.full,
   },
 
   badgesSection: { marginBottom: spacing[6] },

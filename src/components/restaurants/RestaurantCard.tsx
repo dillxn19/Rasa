@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   TouchableOpacity,
@@ -19,6 +19,12 @@ import { AvatarStack } from '@/components/ui/Avatar';
 import type { Restaurant, Review } from '@/types';
 import { CATEGORY_LABELS, DIETARY_LABELS, PRICE_LABELS } from '@/types';
 import { getOpenStatus } from '@/lib/openingHours';
+import { useQueryClient } from '@tanstack/react-query';
+import { useAuthStore } from '@/stores/authStore';
+import { saveRestaurant, unsaveRestaurant } from '@/services/restaurants';
+import { useReviewedRestaurantIds } from '@/hooks/useReviewedRestaurants';
+import { useSavedRestaurantIds } from '@/hooks/useSavedRestaurants';
+import { toast } from '@/stores/toastStore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -51,10 +57,42 @@ export function RestaurantCard({
   style,
 }: RestaurantCardProps) {
   const press = usePressScale();
+  const qc = useQueryClient();
+  const profileId = useAuthStore(s => s.profile?.id);
+  const reviewedIds = useReviewedRestaurantIds();
+  const savedIds = useSavedRestaurantIds();
+  const hasVisited = reviewedIds.has(restaurant.id);
+  // Reflect the real saved state (from the shared saved-ids set) with an optional
+  // local override for the optimistic toggle on this card.
+  const [savedOverride, setSavedOverride] = useState<boolean | null>(null);
+  const isSaved = savedOverride ?? (restaurant.is_saved ?? savedIds.has(restaurant.id));
+  const [saving, setSaving] = useState(false);
+
   const handlePress = () => {
     Haptics.selectionAsync().catch(() => {});
     if (onPress) onPress();
     else router.push(`/restaurant/${restaurant.slug ?? restaurant.id}`);
+  };
+
+  // Toggle bookmark directly from the card (no need to open the restaurant).
+  const handleSave = async () => {
+    if (!profileId || saving) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    const next = !isSaved;
+    setSavedOverride(next);
+    setSaving(true);
+    try {
+      if (next) await saveRestaurant(profileId, restaurant.id);
+      else await unsaveRestaurant(profileId, restaurant.id);
+      // Refresh the shared saved-ids set + the profile's Saved tab (key ['saved', uid]).
+      qc.invalidateQueries({ queryKey: ['userSavedIds', profileId] });
+      qc.invalidateQueries({ queryKey: ['saved', profileId] });
+    } catch {
+      setSavedOverride(!next); // revert on failure
+      toast.error('Could not update your saves. Try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const openStatus = getOpenStatus(restaurant.opening_hours);
@@ -78,14 +116,25 @@ export function RestaurantCard({
           </View>
         )}
 
-        {/* Save */}
-        <TouchableOpacity style={styles.saveBtn}>
-          <Ionicons
-            name={restaurant.is_saved ? 'bookmark' : 'bookmark-outline'}
-            size={20}
-            color={restaurant.is_saved ? colors.bookmarked : colors.white}
-          />
-        </TouchableOpacity>
+        {/* Been-there checkmark (rated) — otherwise a functional bookmark */}
+        {hasVisited ? (
+          <View style={[styles.saveBtn, styles.visitedBtn]}>
+            <Ionicons name="checkmark-circle" size={22} color={colors.success} />
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={[styles.saveBtn, isSaved && styles.saveBtnActive]}
+            onPress={handleSave}
+            hitSlop={8}
+            activeOpacity={0.8}
+          >
+            <Ionicons
+              name={isSaved ? 'bookmark' : 'bookmark-outline'}
+              size={20}
+              color={isSaved ? colors.bookmarked : colors.white}
+            />
+          </TouchableOpacity>
+        )}
 
         {/* Halal badge */}
         {(isHalal || isMuslimFriendly) && (
@@ -283,6 +332,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.blackTransparent40,
     borderRadius: radius.full,
     padding: 8,
+  },
+  saveBtnActive: {
+    backgroundColor: colors.white,
+  },
+  visitedBtn: {
+    backgroundColor: colors.white,
+    padding: 6,
   },
   halalBadge: {
     position: 'absolute',

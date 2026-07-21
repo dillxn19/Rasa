@@ -178,11 +178,11 @@ const styles = StyleSheet.create({
   logo: {
     backgroundColor: colors.primary,
     paddingHorizontal: spacing[4],
-    paddingVertical: spacing[2],
+    paddingVertical: spacing[3],
     borderRadius: radius.lg,
     alignSelf: 'flex-start',
   },
-  logoText: { fontSize: 22, fontWeight: '800', color: colors.white, letterSpacing: -1 },
+  logoText: { fontSize: 22, lineHeight: 30, fontWeight: '800', color: colors.white, letterSpacing: -1 },
   referBanner: {
     flexDirection: 'row',
     alignItems: 'center',

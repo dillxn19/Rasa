@@ -2,6 +2,7 @@ import React, { useCallback, useRef } from 'react';
 import {
   View, StyleSheet, RefreshControl, TouchableOpacity, ScrollView, Animated, Switch,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
@@ -109,11 +110,6 @@ export default function HomeScreen() {
             />
           </View>
 
-          {/* Search */}
-          <TouchableOpacity style={styles.headerBtn} onPress={() => router.push('/search')}>
-            <Ionicons name="search-outline" size={22} color={colors.textPrimary} />
-          </TouchableOpacity>
-
           {/* Notifications */}
           <TouchableOpacity
             style={styles.headerBtn}
@@ -149,6 +145,9 @@ export default function HomeScreen() {
         <View style={{ paddingTop: spacing[4] }}>
           <TimeAwareBanner />
         </View>
+
+        {/* Monthly recap promo */}
+        <RecapPromo />
 
         {/* For You recommendations */}
         {!recsLoading && recs.length > 0 && (
@@ -199,6 +198,30 @@ export default function HomeScreen() {
         <View style={{ height: spacing[10] }} />
       </ScrollView>
     </View>
+  );
+}
+
+// Prominent monthly-recap entry on the home feed (no longer buried in settings).
+function RecapPromo() {
+  const month = new Date().toLocaleString('en-US', { month: 'long' });
+  return (
+    <TouchableOpacity activeOpacity={0.9} onPress={() => router.push('/recap')} style={styles.recapPromo}>
+      <LinearGradient
+        colors={['#6D28D9', '#BE185D']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.recapPromoInner}
+      >
+        <View style={styles.recapPromoIcon}>
+          <RText style={{ fontSize: 22, lineHeight: 28 }}>✨</RText>
+        </View>
+        <View style={{ flex: 1 }}>
+          <RText variant="titleMedium" color={colors.white}>Your {month} Recap is ready</RText>
+          <Caption color={colors.whiteTransparent90}>Tap to view & share your food story</Caption>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={colors.white} />
+      </LinearGradient>
+    </TouchableOpacity>
   );
 }
 
@@ -263,6 +286,29 @@ const styles = StyleSheet.create({
   },
   halalLabelActive: {
     color: colors.halal,
+  },
+
+  // Recap promo
+  recapPromo: {
+    marginHorizontal: spacing[4],
+    marginTop: spacing[4],
+    borderRadius: radius.xl,
+    overflow: 'hidden',
+    ...(shadows.sm as object),
+  },
+  recapPromoInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing[4],
+    gap: spacing[3],
+  },
+  recapPromoIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   // Feed divider

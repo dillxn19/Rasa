@@ -207,7 +207,7 @@ export async function getExploreRestaurants(city?: string, page = 0): Promise<Re
 export async function getRestaurantsByCategory(
   city: string,
   category: string,
-  limit = 15,
+  limit = 50,
 ): Promise<Restaurant[]> {
   const { data, error } = await supabase
     .from('restaurants')
@@ -222,6 +222,95 @@ export async function getRestaurantsByCategory(
 
   if (error) throw error;
   return (data as Restaurant[]) ?? [];
+}
+
+/**
+ * Popular, well-known restaurants used to seed a new user's taste graph during
+ * onboarding. Prefers the user's city (familiar places = more likely they've
+ * been) and backfills with top spots elsewhere so the step is never empty.
+ */
+export async function getOnboardingSeedRestaurants(city?: string, limit = 12): Promise<Restaurant[]> {
+  const base = () =>
+    supabase
+      .from('restaurants')
+      .select('*')
+      .eq('is_approved', true)
+      .eq('is_active', true)
+      .order('total_reviews', { ascending: false })
+      .order('overall_rating', { ascending: false });
+
+  const seen = new Set<string>();
+  const out: Restaurant[] = [];
+
+  if (city) {
+    const { data } = await base().eq('city', city).limit(limit);
+    for (const r of (data as Restaurant[]) ?? []) {
+      if (!seen.has(r.id)) { seen.add(r.id); out.push(r); }
+    }
+  }
+
+  if (out.length < limit) {
+    const { data } = await base().limit(limit);
+    for (const r of (data as Restaurant[]) ?? []) {
+      if (out.length >= limit) break;
+      if (!seen.has(r.id)) { seen.add(r.id); out.push(r); }
+    }
+  }
+
+  return out.slice(0, limit);
+}
+
+/**
+ * Restaurants near a coordinate, sorted by distance. Uses a lat/lng bounding box
+ * (cheap, index-friendly) to prefilter, then sorts client-side by true haversine
+ * distance. `radiusKm` defaults to 8km (city-scale). Rows without coordinates are
+ * excluded. Returns each restaurant with a `distance_km` field.
+ */
+export async function getNearbyRestaurants(
+  lat: number,
+  lng: number,
+  opts: { radiusKm?: number; limit?: number; category?: string; halalOnly?: boolean } = {},
+): Promise<Restaurant[]> {
+  const radiusKm = opts.radiusKm ?? 8;
+  const limit = opts.limit ?? 40;
+  // Degrees per km: latitude ~1/111; longitude scales by cos(lat).
+  const dLat = radiusKm / 111;
+  const dLng = radiusKm / (111 * Math.max(0.1, Math.cos((lat * Math.PI) / 180)));
+
+  let query = supabase
+    .from('restaurants')
+    .select('*')
+    .eq('is_approved', true)
+    .eq('is_active', true)
+    .gte('latitude', lat - dLat)
+    .lte('latitude', lat + dLat)
+    .gte('longitude', lng - dLng)
+    .lte('longitude', lng + dLng)
+    .limit(200);
+
+  if (opts.category) query = query.eq('category', opts.category);
+  if (opts.halalOnly) query = query.contains('dietary_options', ['halal_certified']);
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  const R = 6371;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const withDist = ((data as Restaurant[]) ?? [])
+    .filter(r => r.latitude != null && r.longitude != null)
+    .map(r => {
+      const a =
+        Math.sin(toRad(r.latitude! - lat) / 2) ** 2 +
+        Math.cos(toRad(lat)) * Math.cos(toRad(r.latitude!)) *
+          Math.sin(toRad(r.longitude! - lng) / 2) ** 2;
+      const distance_km = 2 * R * Math.asin(Math.sqrt(a));
+      return { ...r, distance_km };
+    })
+    .filter(r => (r.distance_km ?? Infinity) <= radiusKm)
+    .sort((a, b) => (a.distance_km ?? 0) - (b.distance_km ?? 0))
+    .slice(0, limit);
+
+  return withDist;
 }
 
 export async function getTrendingRestaurants(city: string, limit = 10): Promise<Restaurant[]> {
@@ -254,6 +343,44 @@ export async function unsaveRestaurant(userId: string, restaurantId: string): Pr
     .eq('user_id', userId)
     .eq('restaurant_id', restaurantId);
   if (error) throw error;
+}
+
+/**
+ * Followers-you-follow who have this restaurant on their "want to try" list.
+ * Powers the `who_saved` gated feature. Returns the people the current user
+ * follows who saved this place.
+ */
+/** Count of public reviews per star bucket for a restaurant (index 0 = 1★ … 4 = 5★). */
+export async function getRestaurantRatingDistribution(restaurantId: string): Promise<number[]> {
+  const { data } = await supabase
+    .from('reviews')
+    .select('rating')
+    .eq('restaurant_id', restaurantId)
+    .eq('is_public', true);
+  const dist = [0, 0, 0, 0, 0];
+  for (const r of (data ?? []) as { rating: number }[]) {
+    const bucket = Math.min(4, Math.max(0, Math.round(r.rating ?? 0) - 1));
+    dist[bucket]++;
+  }
+  return dist;
+}
+
+export async function getFollowersWhoSaved(restaurantId: string, currentUserId: string) {
+  const [{ data: savers }, { data: following }] = await Promise.all([
+    supabase
+      .from('saved_restaurants')
+      .select('user:users!user_id(id, username, display_name, avatar_url)')
+      .eq('restaurant_id', restaurantId),
+    supabase
+      .from('follows')
+      .select('following_id')
+      .eq('follower_id', currentUserId),
+  ]);
+
+  const followingIds = new Set((following ?? []).map((f: { following_id: string }) => f.following_id));
+  return ((savers ?? []) as { user: { id: string; username: string; display_name: string; avatar_url: string | null } }[])
+    .map(s => s.user)
+    .filter(u => u && followingIds.has(u.id));
 }
 
 export async function logVisit(userId: string, restaurantId: string): Promise<void> {

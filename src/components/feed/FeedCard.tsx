@@ -4,6 +4,8 @@ import {
   TouchableOpacity,
   StyleSheet,
   Dimensions,
+  ScrollView,
+  Pressable,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -14,6 +16,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { colors, spacing, radius, shadows, gradients } from '@/theme';
 import { useTheme } from '@/theme/ThemeProvider';
 import { RText, Caption } from '@/components/ui/Text';
+import { scoreColor } from '@/components/profile/ReviewCard';
 import { Avatar } from '@/components/ui/Avatar';
 import type { FeedItem } from '@/types';
 import { likeReview, unlikeReview, saveRestaurant, unsaveRestaurant } from '@/services/restaurants';
@@ -145,8 +148,11 @@ function ReviewFeedCard({
   timeAgo: string;
 }) {
   const theme = useTheme();
+  // Only the reviewer's OWN photos — never the restaurant's stock cover — so the
+  // feed reads like real posts, and no-photo reviews get a clean branded card.
   const photos = item.review?.photos ?? [];
-  const coverPhoto = photos[0] ?? item.restaurant?.cover_photo_url;
+  const userPhoto = photos[0];
+  const rating = item.review?.rating ?? 0;
 
   return (
     <View style={styles.card}>
@@ -170,32 +176,39 @@ function ReviewFeedCard({
         </TouchableOpacity>
       </View>
 
-      {/* Restaurant photo */}
-      <TouchableOpacity onPress={onNavigateRestaurant} activeOpacity={0.95}>
-        {coverPhoto ? (
+      {/* The reviewer's photo (IG-post style) — or a clean branded card if none */}
+      <View>
+        {userPhoto ? (
           <View style={styles.photoContainer}>
-            <Image
-              source={{ uri: coverPhoto }}
-              style={styles.photo}
-              contentFit="cover"
-              transition={300}
-            />
+            {photos.length > 1 ? (
+              <FeedPhotoCarousel photos={photos} onPressPhoto={onNavigateRestaurant} />
+            ) : (
+              <Pressable onPress={onNavigateRestaurant} style={styles.photo}>
+                <Image
+                  source={{ uri: userPhoto }}
+                  style={styles.photo}
+                  contentFit="cover"
+                  transition={300}
+                />
+              </Pressable>
+            )}
             <LinearGradient
               colors={['transparent', 'rgba(0,0,0,0.7)']}
               style={styles.photoGradient}
+              pointerEvents="none"
             />
             {/* Restaurant info overlay */}
-            <View style={styles.photoOverlay}>
+            <View style={styles.photoOverlay} pointerEvents="none">
               <View style={styles.photoOverlayContent}>
                 <RText variant="h4" color={colors.white} numberOfLines={1}>
                   {item.restaurant?.name}
                 </RText>
                 <View style={styles.ratingRow}>
-                  {item.review?.rating ? (
+                  {rating ? (
                     <View style={styles.ratingBadge}>
                       <RText style={{ fontSize: 13, lineHeight: 17 }}>⭐</RText>
                       <RText style={{ fontSize: 15, fontWeight: '800', color: colors.white, marginLeft: 4 }}>
-                        {item.review.rating % 1 === 0 ? item.review.rating : item.review.rating.toFixed(1)}
+                        {rating % 1 === 0 ? rating : rating.toFixed(1)}
                       </RText>
                     </View>
                   ) : null}
@@ -217,19 +230,20 @@ function ReviewFeedCard({
             )}
           </View>
         ) : (
-          <View style={[styles.photoContainer, styles.photoPlaceholder]}>
-            <Ionicons name="restaurant-outline" size={48} color={colors.gray300} />
-            <RText variant="titleMedium" color={colors.gray400} style={{ marginTop: spacing[2] }}>
-              {item.restaurant?.name}
-            </RText>
-          </View>
+          <Pressable onPress={onNavigateRestaurant}>
+            <NoPhotoBanner
+              name={item.restaurant?.name}
+              rating={rating}
+              category={item.restaurant?.category}
+            />
+          </Pressable>
         )}
-      </TouchableOpacity>
+      </View>
 
       {/* Review content */}
       {item.review?.content && (
         <View style={styles.reviewContent}>
-          <RText variant="bodyMedium" color={colors.textPrimary} numberOfLines={3}>
+          <RText variant="bodyMedium" color={colors.textPrimary} numberOfLines={userPhoto ? 3 : 5}>
             "{item.review.content}"
           </RText>
         </View>
@@ -285,6 +299,64 @@ function ReviewFeedCard({
 
       {/* Separator */}
       <View style={styles.separator} />
+    </View>
+  );
+}
+
+// Horizontal, swipeable carousel of the reviewer's photos (IG-style) with page
+// dots. Each image is a Pressable so a tap still opens the restaurant while
+// horizontal swipes page through the photos.
+function FeedPhotoCarousel({ photos, onPressPhoto }: { photos: string[]; onPressPhoto: () => void }) {
+  const [idx, setIdx] = useState(0);
+  return (
+    <>
+      <ScrollView
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onScroll={(e) => setIdx(Math.round(e.nativeEvent.contentOffset.x / CARD_WIDTH))}
+        scrollEventThrottle={16}
+      >
+        {photos.map((p, i) => (
+          <Pressable key={i} onPress={onPressPhoto}>
+            <Image source={{ uri: p }} style={styles.carouselPhoto} contentFit="cover" transition={200} />
+          </Pressable>
+        ))}
+      </ScrollView>
+      <View style={styles.carouselDots} pointerEvents="none">
+        {photos.map((_, i) => (
+          <View key={i} style={[styles.carouselDot, i === idx && styles.carouselDotActive]} />
+        ))}
+      </View>
+    </>
+  );
+}
+
+// Clean, standard card for reviews without a photo — restaurant name + score,
+// no fake image, no stray icon. Lets the review text carry the card.
+function NoPhotoBanner({ name, rating, category }: {
+  name?: string;
+  rating: number;
+  category?: string;
+}) {
+  return (
+    <View style={styles.noPhoto}>
+      <View style={{ flex: 1, marginRight: spacing[3] }}>
+        <RText variant="h4" color={colors.textPrimary} numberOfLines={2}>{name ?? 'Restaurant'}</RText>
+        {category ? (
+          <Caption color={colors.textSecondary} style={{ marginTop: 2 }}>
+            {category.replace(/_/g, ' ')}
+          </Caption>
+        ) : null}
+      </View>
+      {rating > 0 && (
+        <View style={[styles.noPhotoBadge, { backgroundColor: scoreColor(rating) }]}>
+          <RText style={{ fontSize: 18, fontWeight: '800', color: colors.white, lineHeight: 22 }}>
+            {rating % 1 === 0 ? rating.toFixed(0) : rating.toFixed(1)}
+          </RText>
+          <Ionicons name="star" size={9} color={colors.whiteTransparent90} style={{ marginTop: -2 }} />
+        </View>
+      )}
     </View>
   );
 }
@@ -421,6 +493,45 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   photoPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  carouselPhoto: {
+    width: CARD_WIDTH,
+    height: PHOTO_HEIGHT,
+  },
+  carouselDots: {
+    position: 'absolute',
+    top: spacing[3],
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: spacing[1],
+  },
+  carouselDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.5)',
+  },
+  carouselDotActive: { backgroundColor: colors.white, width: 16 },
+  noPhoto: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing[4],
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[4],
+    borderRadius: radius.xl,
+    minHeight: 88,
+    backgroundColor: colors.gray50,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+  },
+  noPhotoBadge: {
+    width: 46,
+    height: 46,
+    borderRadius: radius.lg,
     alignItems: 'center',
     justifyContent: 'center',
   },

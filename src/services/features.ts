@@ -37,14 +37,14 @@ export const FEATURES: Record<string, FeatureDef> = {
   },
   // Dual-track: referral OR coins (2)
   store_averages: {
-    id: 'store_averages', name: 'Store Averages', emoji: '⭐',
-    description: 'Aggregate community rating and trend for every store.',
-    referralsRequired: 2, coinCost: 500,
+    id: 'store_averages', name: 'Community Ratings', emoji: '⭐',
+    description: 'Reveal the aggregate community rating on every restaurant.',
+    referralsRequired: 1, coinCost: null, // referral-only — cannot be bought with coins
   },
   monthly_recap: {
     id: 'monthly_recap', name: 'Monthly Recap', emoji: '✨',
     description: 'Your shareable wrapped: top places, cuisines, cities and stats.',
-    referralsRequired: 3, coinCost: 800,
+    referralsRequired: 1, coinCost: 800,
   },
 };
 

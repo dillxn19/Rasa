@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Session, User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
+import { queryClient } from '@/lib/queryClient';
 import { loadUserHalal, useSettingsStore } from './settingsStore';
 import type { User } from '@/types';
 
@@ -63,9 +64,16 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
 
       // Listen for auth changes
       supabase.auth.onAuthStateChange(async (event, newSession) => {
+        const prevUserId = get().supabaseUser?.id;
         set({ session: newSession, supabaseUser: newSession?.user ?? null });
 
         if (event === 'SIGNED_IN' && newSession?.user) {
+          // Different account → wipe the previous user's cached queries so their
+          // feed/profile/avatar don't linger (the currentUser RQ resource would
+          // otherwise re-mirror stale data back into this store).
+          if (prevUserId && prevUserId !== newSession.user.id) {
+            queryClient.clear();
+          }
           const { data: profile } = await supabase
             .from('users')
             .select('*')
@@ -74,6 +82,7 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
           set({ profile: profile as User | null });
           if (profile) await loadUserHalal((profile as User).id);
         } else if (event === 'SIGNED_OUT') {
+          queryClient.clear();
           set({ profile: null });
           useSettingsStore.getState().setHalalOnly(false);
         }

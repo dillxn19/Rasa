@@ -11,6 +11,7 @@ import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Animated, { useSharedValue, withSpring, useAnimatedStyle } from 'react-native-reanimated';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { colors, spacing, radius, shadows } from '@/theme';
 import { RText, H4, Caption } from '@/components/ui/Text';
 import { Button } from '@/components/ui/Button';
@@ -18,7 +19,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { RatingPicker } from '@/components/ui/StarRating';
 import { useAuthStore } from '@/stores/authStore';
 import { useSettingsStore } from '@/stores/settingsStore';
-import { submitReview, getUserReviewForRestaurant, unsaveRestaurant, searchRestaurantsSupabase } from '@/services/restaurants';
+import { submitReview, getUserReviewForRestaurant, saveRestaurant, unsaveRestaurant, searchRestaurantsSupabase } from '@/services/restaurants';
 import { awardReviewRewards } from '@/services/rewards';
 import { ReviewSuccessOverlay, type ReviewSuccessData } from '@/components/ui/ReviewSuccessOverlay';
 import { toast } from '@/stores/toastStore';
@@ -37,13 +38,15 @@ const STEP_LABELS: Record<Step, string> = {
   details:    'Tell us more',
 };
 
-// ─── Meal time quick tag ──────────────────────────────────────
-const MEAL_TAGS = [
-  { label: '☀️ Breakfast', value: 'breakfast' },
-  { label: '🍱 Lunch', value: 'lunch' },
-  { label: '🌆 Dinner', value: 'dinner' },
-  { label: '🌙 Supper', value: 'supper' },
-];
+// ─── Visit-date helpers ───────────────────────────────────────
+function isSameDay(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+function yesterday() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d;
+}
 
 export default function AddReviewScreen() {
   const { profile } = useAuthStore();
@@ -68,7 +71,8 @@ export default function AddReviewScreen() {
   const [content, setContent] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
   const [isPublic, setIsPublic] = useState(true);
-  const [mealTag, setMealTag] = useState('');
+  const [visitDate, setVisitDate] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [success, setSuccess] = useState<ReviewSuccessData | null>(null);
 
@@ -171,6 +175,7 @@ export default function AddReviewScreen() {
         content: content.trim() || undefined,
         photos,
         is_public: isPublic,
+        visit_date: visitDate.toISOString().split('T')[0],
       });
     },
     onSuccess: async () => {
@@ -213,7 +218,7 @@ export default function AddReviewScreen() {
     setRating(0);
     setContent('');
     setPhotos([]);
-    setMealTag('');
+    setVisitDate(new Date());
     setSearchQuery('');
     setSearchResults([]);
   }
@@ -303,6 +308,29 @@ export default function AddReviewScreen() {
     if (!r) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setStep('rate');
+  };
+
+  // Beli-style "+" on a search result: pick it and jump straight to rating.
+  const selectAndRate = (r: AlgoliaRestaurant) => {
+    setRestaurant(r);
+    setSearchResults([]);
+    setSearchQuery('');
+    goToRate(r);
+  };
+
+  // Beli-style bookmark on a search result: quick-save without rating.
+  const toggleSave = async (r: AlgoliaRestaurant) => {
+    if (!profile) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    const isSaved = savedIds?.has(r.objectID);
+    try {
+      if (isSaved) await unsaveRestaurant(profile.id, r.objectID);
+      else await saveRestaurant(profile.id, r.objectID);
+      qc.invalidateQueries({ queryKey: ['userSavedIds', profile.id] });
+      qc.invalidateQueries({ queryKey: ['saved', profile.id] });
+    } catch {
+      toast.error('Could not update your saves.');
+    }
   };
 
   const goToDetails = () => {
@@ -404,36 +432,54 @@ export default function AddReviewScreen() {
                 {searchResults.length > 0 ? (
                   <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
                     <View style={styles.resultsList}>
-                      {searchResults.map(r => (
-                        <TouchableOpacity
-                          key={r.objectID}
-                          style={styles.resultRow}
-                          onPress={() => { setRestaurant(r); setSearchResults([]); setSearchQuery(''); goToRate(r); }}
-                        >
-                          <View style={styles.resultIcon}>
-                            <Ionicons name="restaurant" size={18} color={colors.primary} />
+                      {searchResults.map(r => {
+                        const reviewed = reviewedIds?.has(r.objectID);
+                        const saved = savedIds?.has(r.objectID);
+                        return (
+                          <View key={r.objectID} style={styles.resultRow}>
+                            <TouchableOpacity style={styles.resultMain} onPress={() => router.push(`/restaurant/${r.objectID}`)} activeOpacity={0.7}>
+                              <View style={styles.resultIcon}>
+                                <Ionicons name="restaurant" size={18} color={colors.primary} />
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <View style={styles.resultNameRow}>
+                                  <RText variant="titleSmall" numberOfLines={1} style={{ flexShrink: 1 }}>{r.name}</RText>
+                                  {r.dietary_options?.includes('halal_certified') && (
+                                    <View style={styles.halalTag}>
+                                      <Caption color={colors.halal} style={{ fontWeight: '700', fontSize: 10 }}>HALAL</Caption>
+                                    </View>
+                                  )}
+                                </View>
+                                <View style={styles.resultMeta}>
+                                  <Caption>{CATEGORY_LABELS[r.category] ?? r.category}</Caption>
+                                  <Caption color={colors.textTertiary}> · {r.area ?? r.city}</Caption>
+                                  {r.price_range ? <Caption color={colors.textTertiary}> · {r.price_range}</Caption> : null}
+                                </View>
+                              </View>
+                            </TouchableOpacity>
+
+                            {reviewed ? (
+                              <View style={styles.beenChip}>
+                                <Ionicons name="checkmark-circle" size={16} color={colors.success} />
+                                <RText variant="labelSmall" color={colors.success} style={{ marginLeft: 3, fontWeight: '700' }}>Been</RText>
+                              </View>
+                            ) : (
+                              <View style={styles.resultActions}>
+                                <TouchableOpacity style={styles.resultIconBtn} onPress={() => toggleSave(r)} hitSlop={6}>
+                                  <Ionicons
+                                    name={saved ? 'bookmark' : 'bookmark-outline'}
+                                    size={20}
+                                    color={saved ? colors.accent : colors.textSecondary}
+                                  />
+                                </TouchableOpacity>
+                                <TouchableOpacity style={styles.resultRateBtn} onPress={() => selectAndRate(r)} activeOpacity={0.85}>
+                                  <Ionicons name="add" size={22} color={colors.white} />
+                                </TouchableOpacity>
+                              </View>
+                            )}
                           </View>
-                          <View style={{ flex: 1 }}>
-                            <RText variant="titleSmall">{r.name}</RText>
-                            <View style={styles.resultMeta}>
-                              <Caption>{CATEGORY_LABELS[r.category] ?? r.category}</Caption>
-                              <Caption color={colors.textTertiary}> · {r.area ?? r.city}</Caption>
-                              <Caption color={colors.textTertiary}> · {r.price_range}</Caption>
-                            </View>
-                          </View>
-                          {reviewedIds?.has(r.objectID) && (
-                            <Ionicons name="checkmark-circle" size={18} color={colors.success} />
-                          )}
-                          {!reviewedIds?.has(r.objectID) && savedIds?.has(r.objectID) && (
-                            <Ionicons name="bookmark" size={16} color={colors.accent} />
-                          )}
-                          {r.dietary_options?.includes('halal_certified') && (
-                            <View style={styles.halalTag}>
-                              <Caption color={colors.halal} style={{ fontWeight: '700', fontSize: 10 }}>HALAL</Caption>
-                            </View>
-                          )}
-                        </TouchableOpacity>
-                      ))}
+                        );
+                      })}
                     </View>
                   </ScrollView>
                 ) : searchQuery.length >= 2 && !isSearching ? (
@@ -615,22 +661,41 @@ export default function AddReviewScreen() {
               <Caption color={colors.textTertiary} align="right">{500 - content.length} chars left</Caption>
             </View>
 
-            {/* Meal time */}
+            {/* Visit date */}
             <View style={styles.detailSection}>
               <Caption style={{ marginBottom: spacing[3] }}>When did you go?</Caption>
               <View style={styles.tagRow}>
-                {MEAL_TAGS.map(t => (
-                  <TouchableOpacity
-                    key={t.value}
-                    style={[styles.mealTag, mealTag === t.value && styles.mealTagActive]}
-                    onPress={() => setMealTag(mealTag === t.value ? '' : t.value)}
-                  >
-                    <RText style={{ fontSize: 13, color: mealTag === t.value ? colors.primary : colors.textSecondary }}>
-                      {t.label}
-                    </RText>
-                  </TouchableOpacity>
-                ))}
+                <TouchableOpacity
+                  style={[styles.mealTag, isSameDay(visitDate, new Date()) && styles.mealTagActive]}
+                  onPress={() => setVisitDate(new Date())}
+                >
+                  <RText style={{ fontSize: 13, color: isSameDay(visitDate, new Date()) ? colors.primary : colors.textSecondary }}>Today</RText>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.mealTag, isSameDay(visitDate, yesterday()) && styles.mealTagActive]}
+                  onPress={() => setVisitDate(yesterday())}
+                >
+                  <RText style={{ fontSize: 13, color: isSameDay(visitDate, yesterday()) ? colors.primary : colors.textSecondary }}>Yesterday</RText>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.dateBtn} onPress={() => setShowDatePicker(true)}>
+                  <Ionicons name="calendar-outline" size={15} color={colors.textSecondary} />
+                  <RText style={{ fontSize: 13, color: colors.textSecondary, marginLeft: 6 }}>
+                    {visitDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </RText>
+                </TouchableOpacity>
               </View>
+              {showDatePicker && (
+                <DateTimePicker
+                  value={visitDate}
+                  mode="date"
+                  maximumDate={new Date()}
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={(_, d) => {
+                    setShowDatePicker(Platform.OS === 'ios');
+                    if (d) setVisitDate(d);
+                  }}
+                />
+              )}
             </View>
 
             {/* Privacy */}
@@ -756,9 +821,15 @@ const styles = StyleSheet.create({
   resultRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing[4],
+    paddingVertical: spacing[3],
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
+    gap: spacing[2],
+  },
+  resultMain: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
     gap: spacing[3],
   },
   resultIcon: {
@@ -769,11 +840,38 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  resultNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+  },
   resultMeta: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 2,
     flexWrap: 'wrap',
+  },
+  resultActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+  },
+  resultIconBtn: { padding: spacing[1] },
+  resultRateBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  beenChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.successLight,
+    paddingHorizontal: spacing[2],
+    paddingVertical: 4,
+    borderRadius: radius.full,
   },
   halalTag: {
     backgroundColor: colors.halalBg,
@@ -913,6 +1011,16 @@ const styles = StyleSheet.create({
   mealTagActive: {
     borderColor: colors.primary,
     backgroundColor: colors.primarySurface,
+  },
+  dateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+    borderRadius: radius.full,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
   },
   privacyRow: {
     flexDirection: 'row',

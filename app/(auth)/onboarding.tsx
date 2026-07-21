@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -24,13 +24,18 @@ import { RText, H2, Body, Caption } from '@/components/ui/Text';
 import { useAuthStore } from '@/stores/authStore';
 import { supabase } from '@/lib/supabase';
 import { getPendingReferrer, clearPendingReferrer } from '@/lib/referral';
-import { recordReferral } from '@/services/referrals';
+import { recordReferral, activateReferral } from '@/services/referrals';
+import { getOnboardingSeedRestaurants, submitReview } from '@/services/restaurants';
+import { StarRating } from '@/components/ui/StarRating';
+import { Avatar } from '@/components/ui/Avatar';
 import {
-  CuisineType, DietaryOption, CUISINE_LABELS, DIETARY_LABELS, MALAYSIA_CITIES,
+  CuisineType, DietaryOption, CUISINE_LABELS, DIETARY_LABELS, CATEGORY_LABELS, MALAYSIA_CITIES,
+  type Restaurant,
 } from '@/types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const TOTAL_STEPS = 4;
+const TOTAL_STEPS = 5;
+const MIN_SEED_RATINGS = 3;
 
 const CUISINES: CuisineType[] = [
   'malay', 'chinese', 'indian', 'mamak', 'nyonya',
@@ -55,6 +60,12 @@ export default function OnboardingScreen() {
   const [city, setCity] = useState('Kuala Lumpur');
   const [selectedCuisines, setSelectedCuisines] = useState<CuisineType[]>([]);
   const [selectedDietary, setSelectedDietary] = useState<DietaryOption[]>([]);
+
+  // Taste-seed step: restaurants the user rates to bootstrap their taste graph.
+  const [seedRestaurants, setSeedRestaurants] = useState<Restaurant[]>([]);
+  const [seedLoading, setSeedLoading] = useState(false);
+  const [seedRatings, setSeedRatings] = useState<Record<string, number>>({});
+  const seedCount = Object.keys(seedRatings).length;
 
   const progress = useSharedValue(0);
 
@@ -84,6 +95,21 @@ export default function OnboardingScreen() {
     );
   };
 
+  const rateSeed = (restaurantId: string, rating: number) => {
+    setSeedRatings(prev => ({ ...prev, [restaurantId]: rating }));
+  };
+
+  // Lazily load seed restaurants the first time the user reaches the taste step.
+  useEffect(() => {
+    if (step === TOTAL_STEPS - 1 && seedRestaurants.length === 0 && !seedLoading) {
+      setSeedLoading(true);
+      getOnboardingSeedRestaurants(city, 12)
+        .then(setSeedRestaurants)
+        .catch(() => setSeedRestaurants([]))
+        .finally(() => setSeedLoading(false));
+    }
+  }, [step, city, seedRestaurants.length, seedLoading]);
+
   const handleComplete = async () => {
     if (!profile) return;
     setIsLoading(true);
@@ -101,6 +127,22 @@ export default function OnboardingScreen() {
         })
         .eq('id', profile.id);
 
+      // Seed the taste graph with the onboarding ratings (plain reviews — no
+      // coins, so onboarding can't be farmed). Non-blocking on failure.
+      const seedEntries = Object.entries(seedRatings);
+      if (seedEntries.length > 0) {
+        await Promise.all(
+          seedEntries.map(([restaurantId, rating]) =>
+            submitReview({
+              user_id: profile.id,
+              restaurant_id: restaurantId,
+              rating,
+              is_public: true,
+            }).catch(() => {})
+          )
+        );
+      }
+
       await refreshProfile();
 
       // If this user arrived via someone's invite link, record the referral now
@@ -109,6 +151,8 @@ export default function OnboardingScreen() {
         const ref = await getPendingReferrer();
         if (ref && ref !== username.toLowerCase().trim()) {
           await recordReferral(ref, profile.id);
+          // Rating spots during onboarding is genuine engagement → activate now.
+          if (seedEntries.length > 0) await activateReferral(profile.id);
         }
         await clearPendingReferrer();
       } catch { /* non-fatal */ }
@@ -133,6 +177,13 @@ export default function OnboardingScreen() {
     <StepCity city={city} onCityChange={setCity} />,
     <StepCuisines selected={selectedCuisines} onToggle={toggleCuisine} />,
     <StepDietary selected={selectedDietary} onToggle={toggleDietary} />,
+    <StepTaste
+      restaurants={seedRestaurants}
+      ratings={seedRatings}
+      onRate={rateSeed}
+      loading={seedLoading}
+      city={city}
+    />,
   ];
 
   const stepTitles = [
@@ -140,6 +191,7 @@ export default function OnboardingScreen() {
     'Where are you based?',
     'What cuisines do you love?',
     'Any dietary preferences?',
+    'Rate a few places',
   ];
 
   const stepSubtitles = [
@@ -147,13 +199,17 @@ export default function OnboardingScreen() {
     'We\'ll find restaurants near you',
     'Pick all that apply — we\'ll personalise your feed',
     'Skip if none apply',
+    `Rate at least ${MIN_SEED_RATINGS} spots you've tried — this powers your taste matches & recommendations`,
   ];
 
+  // Taste step can proceed once the user rates the minimum — or immediately if
+  // there are no seed restaurants to rate (empty DB), so nobody gets trapped.
   const canProceed = [
     displayName.length >= 2 && username.length >= 3,
     city.length > 0,
     selectedCuisines.length > 0,
     true,
+    seedCount >= MIN_SEED_RATINGS || (!seedLoading && seedRestaurants.length === 0),
   ];
 
   return (
@@ -196,18 +252,17 @@ export default function OnboardingScreen() {
           />
         ) : (
           <Button
-            label="Start exploring"
+            label={
+              seedCount >= MIN_SEED_RATINGS || seedRestaurants.length === 0
+                ? 'Start exploring'
+                : `Rate ${MIN_SEED_RATINGS - seedCount} more to continue`
+            }
             onPress={handleComplete}
             fullWidth
             size="lg"
             isLoading={isLoading}
+            isDisabled={!canProceed[step]}
           />
-        )}
-
-        {step === TOTAL_STEPS - 1 && (
-          <TouchableOpacity style={styles.skipBtn} onPress={handleComplete}>
-            <RText variant="bodyMedium" color={colors.textSecondary}>Skip for now</RText>
-          </TouchableOpacity>
         )}
       </View>
     </SafeAreaView>
@@ -411,10 +466,98 @@ function StepDietary({
   );
 }
 
+function StepTaste({
+  restaurants, ratings, onRate, loading, city,
+}: {
+  restaurants: Restaurant[];
+  ratings: Record<string, number>;
+  onRate: (id: string, rating: number) => void;
+  loading: boolean;
+  city: string;
+}) {
+  const rated = Object.keys(ratings).length;
+
+  if (loading) {
+    return (
+      <View style={[styles.stepContent, { alignItems: 'center', paddingTop: spacing[16] }]}>
+        <RText style={{ fontSize: 40, lineHeight: 50 }}>🍜</RText>
+        <Caption color={colors.textSecondary} style={{ marginTop: spacing[3] }}>
+          Finding popular spots{city ? ` in ${city}` : ''}…
+        </Caption>
+      </View>
+    );
+  }
+
+  if (restaurants.length === 0) {
+    return (
+      <View style={[styles.stepContent, { alignItems: 'center', paddingTop: spacing[12] }]}>
+        <RText style={{ fontSize: 40, lineHeight: 50 }}>🌱</RText>
+        <RText variant="titleMedium" style={{ marginTop: spacing[3] }}>Nothing to rate yet</RText>
+        <Caption color={colors.textSecondary} align="center" style={{ marginTop: spacing[2], maxWidth: 280 }}>
+          No restaurants here yet — you can start rating as you explore. Tap below to continue.
+        </Caption>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.stepContent}>
+      {/* Progress pill */}
+      <View style={styles.seedProgress}>
+        <RText variant="labelMedium" color={rated >= MIN_SEED_RATINGS ? colors.success : colors.primary}>
+          {rated >= MIN_SEED_RATINGS
+            ? `✓ ${rated} rated — you're all set`
+            : `${rated}/${MIN_SEED_RATINGS} rated`}
+        </RText>
+      </View>
+
+      {restaurants.map(r => {
+        const value = ratings[r.id] ?? 0;
+        return (
+          <View key={r.id} style={[styles.seedRow, value > 0 && styles.seedRowRated]}>
+            <Avatar uri={r.cover_photo_url} name={r.name} size="md" />
+            <View style={{ flex: 1, marginLeft: spacing[3] }}>
+              <RText variant="titleSmall" numberOfLines={1}>{r.name}</RText>
+              <Caption color={colors.textTertiary} numberOfLines={1}>
+                {CATEGORY_LABELS[r.category] ?? r.category}
+                {r.area ? ` · ${r.area}` : r.city ? ` · ${r.city}` : ''}
+              </Caption>
+              <View style={{ marginTop: spacing[1] }}>
+                <StarRating value={value} onChange={(v) => onRate(r.id, v)} size={24} />
+              </View>
+            </View>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  seedProgress: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.primarySurface,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[1],
+    borderRadius: radius.full,
+    marginBottom: spacing[2],
+  },
+  seedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing[3],
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  seedRowRated: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySurface,
   },
   progressTrack: {
     height: 3,

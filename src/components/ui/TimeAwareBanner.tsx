@@ -87,9 +87,14 @@ export function TimeAwareBanner({ onPress }: TimeAwareBannerProps) {
             </Caption>
             <View style={styles.suggestionRow}>
               {config.suggestions.map(s => (
-                <View key={s} style={styles.suggestionPill}>
+                <TouchableOpacity
+                  key={s}
+                  style={styles.suggestionPill}
+                  onPress={() => router.push(`/(tabs)/explore?dishName=${encodeURIComponent(s)}`)}
+                  activeOpacity={0.8}
+                >
                   <RText style={{ fontSize: 11, color: colors.white, fontWeight: '600' }}>{s}</RText>
-                </View>
+                </TouchableOpacity>
               ))}
             </View>
           </View>

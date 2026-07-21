@@ -23,8 +23,10 @@ import { useAuthStore, selectCurrentUserId } from '@/stores/authStore';
 import {
   getRestaurantByIdOrSlug, getRestaurantReviews, getRestaurantPhotos,
   getPopularDishes, getFriendReviews, saveRestaurant, unsaveRestaurant,
+  getFollowersWhoSaved, getRestaurantRatingDistribution,
 } from '@/services/restaurants';
 import { getRestaurantFoodTags, toggleFoodTag } from '@/services/dishes';
+import { useReviewedRestaurantIds } from '@/hooks/useReviewedRestaurants';
 import { getUserCoins } from '@/services/coins';
 import { useFeatureAccess, unlockWithCoins, FEATURES, type FeatureDef } from '@/services/features';
 import { shareInvite } from '@/lib/referral';
@@ -49,6 +51,8 @@ export default function RestaurantScreen() {
   const { isUnlocked, referralCount } = useFeatureAccess();
   const [gate, setGate] = useState<FeatureDef | null>(null);
   const friendsUnlocked = isUnlocked('friends_ratings');
+  const whoSavedUnlocked = isUnlocked('who_saved');
+  const storeAvgUnlocked = isUnlocked('store_averages');
 
   const { data: coins = 0 } = useQuery({
     queryKey: ['userCoins', profile?.id],
@@ -79,6 +83,8 @@ export default function RestaurantScreen() {
   // `id` from the URL may be a slug; `rid` is always the resolved UUID used for
   // all downstream queries and mutations.
   const rid = restaurant?.id ?? '';
+  const reviewedIds = useReviewedRestaurantIds();
+  const hasVisited = !!rid && reviewedIds.has(rid);
 
   const { data: reviews } = useQuery({
     queryKey: queryKeys.restaurantReviews(rid),
@@ -110,6 +116,18 @@ export default function RestaurantScreen() {
     enabled: !!rid,
   });
 
+  const { data: whoSaved } = useQuery({
+    queryKey: ['who-saved', rid, userId],
+    queryFn: () => getFollowersWhoSaved(rid, userId!),
+    enabled: !!rid && !!userId,
+  });
+
+  const { data: ratingDist } = useQuery({
+    queryKey: ['rating-dist', rid],
+    queryFn: () => getRestaurantRatingDistribution(rid),
+    enabled: !!rid && storeAvgUnlocked,
+  });
+
   const tagMutation = useMutation({
     mutationFn: (tag: FoodTagType) => {
       if (!userId || !rid) return Promise.resolve({ added: false });
@@ -131,6 +149,11 @@ export default function RestaurantScreen() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.restaurant(id) });
+      // Keep the shared saved set + the profile Saved tab in sync (['saved', uid]).
+      if (profile) {
+        qc.invalidateQueries({ queryKey: ['userSavedIds', profile.id] });
+        qc.invalidateQueries({ queryKey: ['saved', profile.id] });
+      }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     },
   });
@@ -242,16 +265,23 @@ export default function RestaurantScreen() {
               <TouchableOpacity style={styles.navBtn} onPress={handleShare}>
                 <Ionicons name="share-outline" size={22} color={colors.white} />
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.navBtn}
-                onPress={() => saveMutation.mutate()}
-              >
-                <Ionicons
-                  name={restaurant.is_saved ? 'bookmark' : 'bookmark-outline'}
-                  size={22}
-                  color={restaurant.is_saved ? colors.bookmarked : colors.white}
-                />
-              </TouchableOpacity>
+              {hasVisited ? (
+                // Already rated → show a "been" checkmark instead of the bookmark.
+                <View style={styles.navBtn}>
+                  <Ionicons name="checkmark-circle" size={22} color={colors.success} />
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.navBtn}
+                  onPress={() => saveMutation.mutate()}
+                >
+                  <Ionicons
+                    name={restaurant.is_saved ? 'bookmark' : 'bookmark-outline'}
+                    size={22}
+                    color={restaurant.is_saved ? colors.bookmarked : colors.white}
+                  />
+                </TouchableOpacity>
+              )}
             </View>
           </SafeAreaView>
         </View>
@@ -291,17 +321,35 @@ export default function RestaurantScreen() {
               )}
             </View>
 
-            {/* Rating block */}
+            {/* Rating block — community average is a referral-only perk */}
             <View style={styles.ratingBlock}>
-              <View style={styles.ratingMain}>
-                <RText variant="rating" color={colors.textPrimary}>
-                  {restaurant.overall_rating.toFixed(1)}
-                </RText>
-                <View style={{ marginLeft: spacing[2] }}>
-                  <StarRating value={restaurant.overall_rating} size={18} readonly />
-                  <Caption>{restaurant.total_reviews.toLocaleString()} reviews</Caption>
+              {storeAvgUnlocked ? (
+                <View style={styles.ratingMain}>
+                  <RText variant="rating" color={colors.textPrimary}>
+                    {restaurant.overall_rating.toFixed(1)}
+                  </RText>
+                  <View style={{ marginLeft: spacing[2] }}>
+                    <StarRating value={restaurant.overall_rating} size={18} readonly />
+                    <Caption>{restaurant.total_reviews.toLocaleString()} reviews</Caption>
+                  </View>
                 </View>
-              </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.ratingLocked}
+                  onPress={() => setGate(FEATURES.store_averages)}
+                  activeOpacity={0.85}
+                >
+                  <View style={styles.ratingLockIcon}>
+                    <Ionicons name="lock-closed" size={16} color={colors.primary} />
+                  </View>
+                  <View>
+                    <RText variant="titleSmall" color={colors.primary}>See community rating</RText>
+                    <Caption color={colors.textSecondary}>
+                      Refer a friend to unlock · {restaurant.total_reviews.toLocaleString()} reviews
+                    </Caption>
+                  </View>
+                </TouchableOpacity>
+              )}
 
               {friendReviews && friendReviews.length > 0 && (
                 friendsUnlocked ? (
@@ -349,6 +397,27 @@ export default function RestaurantScreen() {
               )}
             </View>
           </View>
+
+          {/* Community rating distribution (unlocked with store_averages) */}
+          {storeAvgUnlocked && (ratingDist?.some(c => c > 0)) && (
+            <View style={styles.distSection}>
+              <H4 style={{ marginBottom: spacing[3] }}>Rating distribution</H4>
+              {[5, 4, 3, 2, 1].map(star => {
+                const count = ratingDist![star - 1];
+                const total = ratingDist!.reduce((a, b) => a + b, 0);
+                const pct = total ? count / total : 0;
+                return (
+                  <View key={star} style={styles.distRow}>
+                    <RText style={styles.distStar}>{star}★</RText>
+                    <View style={styles.distTrack}>
+                      <View style={[styles.distFill, { width: `${Math.round(pct * 100)}%` }]} />
+                    </View>
+                    <RText style={styles.distCount}>{count}</RText>
+                  </View>
+                );
+              })}
+            </View>
+          )}
 
           {/* Quick actions */}
           <View style={styles.quickActions}>
@@ -398,6 +467,39 @@ export default function RestaurantScreen() {
               size="lg"
             />
           </View>
+
+          {/* Saved by friends (who_saved gated feature) */}
+          {(whoSaved?.length ?? 0) > 0 && (
+            whoSavedUnlocked ? (
+              <View style={styles.whoSavedCard}>
+                <View style={styles.whoSavedAvatars}>
+                  {(whoSaved ?? []).slice(0, 4).map((u, i) => (
+                    <View key={u.id} style={{ marginLeft: i === 0 ? 0 : -10 }}>
+                      <Avatar uri={u.avatar_url} name={u.display_name} size="sm" showBorder />
+                    </View>
+                  ))}
+                </View>
+                <Body color={colors.textSecondary} style={{ flex: 1, marginLeft: spacing[3] }}>
+                  {whoSaved!.length === 1
+                    ? `${whoSaved![0].display_name} wants to try this`
+                    : `${whoSaved![0].display_name} + ${whoSaved!.length - 1} more want to try this`}
+                </Body>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.whoSavedLocked}
+                onPress={() => setGate(FEATURES.who_saved)}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="lock-closed" size={14} color={colors.primary} />
+                <Body color={colors.primary} style={{ marginLeft: spacing[2] }}>
+                  See which friends saved this ({whoSaved!.length})
+                </Body>
+                <View style={{ flex: 1 }} />
+                <Ionicons name="chevron-forward" size={16} color={colors.primary} />
+              </TouchableOpacity>
+            )
+          )}
 
           {/* Community food tags */}
           {(foodTags ?? []).length > 0 && (
@@ -610,6 +712,38 @@ const styles = StyleSheet.create({
   separator: { width: 3, height: 3, borderRadius: 1.5, backgroundColor: colors.gray300 },
   ratingBlock: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   ratingMain: { flexDirection: 'row', alignItems: 'center' },
+  ratingLocked: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[3],
+    backgroundColor: colors.primarySurface,
+    borderRadius: radius.xl,
+    padding: spacing[3],
+    borderWidth: 1,
+    borderColor: colors.primaryLight,
+    borderStyle: 'dashed',
+    flex: 1,
+    marginRight: spacing[3],
+  },
+  ratingLockIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  distSection: {
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[4],
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  distRow: { flexDirection: 'row', alignItems: 'center', gap: spacing[3], paddingVertical: 3 },
+  distStar: { width: 28, fontSize: 13, fontWeight: '600', color: colors.textSecondary },
+  distTrack: { flex: 1, height: 10, borderRadius: 5, backgroundColor: colors.gray100, overflow: 'hidden' },
+  distFill: { height: 10, borderRadius: 5, backgroundColor: colors.primary },
+  distCount: { width: 28, textAlign: 'right', fontSize: 13, color: colors.textSecondary },
   friendRatingCard: {
     backgroundColor: colors.primarySurface,
     borderRadius: radius.xl,
@@ -650,6 +784,28 @@ const styles = StyleSheet.create({
   reviewCTA: {
     paddingHorizontal: spacing[4],
     paddingVertical: spacing[4],
+  },
+  whoSavedCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing[4],
+    marginBottom: spacing[4],
+    padding: spacing[3],
+    backgroundColor: colors.gray50,
+    borderRadius: radius.xl,
+  },
+  whoSavedAvatars: { flexDirection: 'row', alignItems: 'center' },
+  whoSavedLocked: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing[4],
+    marginBottom: spacing[4],
+    padding: spacing[3] + 2,
+    backgroundColor: colors.primarySurface,
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: colors.primaryLight,
+    borderStyle: 'dashed',
   },
   tagsSection: {
     paddingTop: spacing[5],

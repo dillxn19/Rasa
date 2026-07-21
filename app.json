@@ -12,7 +12,9 @@
       "resizeMode": "contain",
       "backgroundColor": "#E8452A"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.rasa.app",
@@ -22,7 +24,10 @@
         "NSPhotoLibraryUsageDescription": "Rasa needs photo library access to share your food photos.",
         "NSLocationWhenInUseUsageDescription": "Rasa uses your location to find restaurants near you.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Rasa uses your location to recommend nearby restaurants.",
-        "UIBackgroundModes": ["fetch", "remote-notification"]
+        "UIBackgroundModes": [
+          "fetch",
+          "remote-notification"
+        ]
       }
     },
     "android": {
@@ -40,7 +45,7 @@
         "ACCESS_COARSE_LOCATION",
         "RECEIVE_BOOT_COMPLETED",
         "VIBRATE"
-      ],
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -57,6 +62,20 @@
           "photosPermission": "Rasa needs access to your photos to share food experiences."
         }
       ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Rasa uses your location to find great food near you."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Rasa saves your monthly recap image to your photos.",
+          "savePhotosPermission": "Rasa saves your monthly recap image to your photos."
+        }
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true
@@ -64,9 +83,6 @@
     "extra": {
       "router": {
         "origin": false
-      },
-      "eas": {
-        "projectId": "your-eas-project-id"
       }
     }
   }

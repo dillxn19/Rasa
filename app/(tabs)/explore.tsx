@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View, StyleSheet, ScrollView, TextInput, TouchableOpacity,
   ActivityIndicator, Dimensions,
@@ -8,20 +8,20 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { colors, spacing, radius } from '@/theme';
 import { useTheme } from '@/theme/ThemeProvider';
 import { RText, Caption } from '@/components/ui/Text';
 import { Avatar } from '@/components/ui/Avatar';
 import { RestaurantCard } from '@/components/restaurants/RestaurantCard';
 import { useAuthStore } from '@/stores/authStore';
-import { getRestaurantsByCategory } from '@/services/restaurants';
+import { getRestaurantsByCategory, searchRestaurantsSupabase } from '@/services/restaurants';
 import { getDiscoverUsers, followUser, unfollowUser, searchUsers } from '@/services/users';
-import { getFeaturedDishes, getTopRestaurantsForDish } from '@/services/dishes';
-import { multiSearch } from '@/lib/algolia';
+import { getFeaturedDishes, getTopRestaurantsForDish, searchDishes } from '@/services/dishes';
+import { multiSearch, searchRestaurants } from '@/lib/algolia';
 import { queryKeys } from '@/lib/queryClient';
 import { MALAYSIA_CITIES } from '@/types';
-import type { RestaurantCategory, Restaurant, Dish, RestaurantDishEntry } from '@/types';
+import type { RestaurantCategory, Restaurant, Dish, RestaurantDishEntry, AlgoliaRestaurant } from '@/types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_GAP = spacing[3];
@@ -54,6 +54,21 @@ const DISH_CATEGORY_EMOJI: Record<string, string> = {
   dim_sum: '🥟', dessert: '🍮', drinks: '🧃', snacks: '🌮', other: '🍽️',
 };
 
+// Curated iconic Malaysian dishes shown as "category" cards — tapping one opens
+// the top spots serving it (dish graph, with an Algolia/name fallback).
+const POPULAR_MY_DISHES: { name: string; emoji: string; gradient: [string, string] }[] = [
+  { name: 'Nasi Lemak', emoji: '🍚', gradient: ['#D94841', '#8B1E1E'] },
+  { name: 'Char Kway Teow', emoji: '🍜', gradient: ['#E07B39', '#B4801F'] },
+  { name: 'Roti Canai', emoji: '🫓', gradient: ['#C79A2E', '#8B6914'] },
+  { name: 'Teh Tarik', emoji: '🧋', gradient: ['#8B6914', '#5C4A1A'] },
+  { name: 'Nasi Kandar', emoji: '🍛', gradient: ['#B45309', '#7C2D12'] },
+  { name: 'Satay', emoji: '🍢', gradient: ['#B53535', '#7A1E1E'] },
+  { name: 'Wan Tan Mee', emoji: '🍜', gradient: ['#374151', '#1F2937'] },
+  { name: 'Chicken Rice', emoji: '🍗', gradient: ['#D9972A', '#A15A1B'] },
+  { name: 'Cendol', emoji: '🍧', gradient: ['#4F8A5B', '#1F5C3A'] },
+  { name: 'Char Siew', emoji: '🥩', gradient: ['#BE185D', '#7A0E3E'] },
+];
+
 // ─── Types ────────────────────────────────────────────────────
 
 type ExploreTab = 'discover' | 'people';
@@ -65,6 +80,7 @@ export default function ExploreScreen() {
   const { profile } = useAuthStore();
   const insets = useSafeAreaInsets();
   const theme = useTheme();
+  const { dishName } = useLocalSearchParams<{ dishName?: string }>();
 
   const [tab, setTab] = useState<ExploreTab>('discover');
   const [view, setView] = useState<DiscoverView>('home');
@@ -99,6 +115,21 @@ export default function ExploreScreen() {
     setView('dish');
   };
 
+  // Resolve a dish by name (from banner pills / curated chips) → open its top spots.
+  const openDishByName = useCallback(async (name: string) => {
+    const results = await searchDishes(name, 1).catch(() => []);
+    if (results.length > 0) {
+      setActiveDish(results[0]);
+      setActiveCat(null);
+      setView('dish');
+    }
+  }, []);
+
+  // Deep link from the home banner / dish chips: /explore?dishName=Teh%20Tarik
+  useEffect(() => {
+    if (dishName) openDishByName(dishName);
+  }, [dishName, openDishByName]);
+
   const goHome = () => {
     setView('home');
     setActiveCat(null);
@@ -120,8 +151,29 @@ export default function ExploreScreen() {
   });
 
   const { data: dishRestaurants, isLoading: dishLoading } = useQuery({
-    queryKey: ['dishRestaurants', activeDish?.id],
-    queryFn: () => getTopRestaurantsForDish(activeDish!.id, 15),
+    queryKey: ['dishRestaurants', activeDish?.id, activeDish?.name],
+    queryFn: async () => {
+      // 1) The dish graph (restaurant_dishes) is the canonical mapping.
+      const graph = await getTopRestaurantsForDish(activeDish!.id, 15);
+      if (graph.length > 0) return graph;
+      // 2) Fallback so real restaurants still surface even before the graph is
+      //    populated: Algolia (indexes dish/tag/cuisine terms) → Postgres name.
+      let hits: AlgoliaRestaurant[] = [];
+      try {
+        const res = await searchRestaurants({ query: activeDish!.name, hitsPerPage: 15 });
+        hits = res.hits;
+      } catch { /* Algolia unconfigured */ }
+      if (hits.length === 0) hits = await searchRestaurantsSupabase(activeDish!.name, { limit: 15 }).catch(() => []);
+      return hits.map(h => ({
+        id: h.objectID,
+        restaurant: {
+          id: h.objectID, slug: h.slug, name: h.name, category: h.category,
+          city: h.city, area: h.area, overall_rating: h.overall_rating, cover_photo_url: h.cover_photo_url,
+        },
+        average_rating: h.overall_rating ?? 0,
+        rating_count: 0,
+      })) as unknown as RestaurantDishEntry[];
+    },
     enabled: view === 'dish' && !!activeDish,
   });
 
@@ -252,6 +304,42 @@ export default function ExploreScreen() {
                     <RText variant="labelMedium" color={city === c ? colors.white : colors.textSecondary}>
                       {c}
                     </RText>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {/* Near me */}
+              <TouchableOpacity
+                style={styles.nearMeCard}
+                onPress={() => router.push('/nearby')}
+                activeOpacity={0.9}
+              >
+                <View style={styles.nearMeIcon}>
+                  <Ionicons name="navigate" size={20} color={colors.white} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <RText variant="titleMedium">Near Me</RText>
+                  <Caption color={colors.textSecondary}>Great food around you right now</Caption>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+              </TouchableOpacity>
+
+              {/* Craving something — curated Malaysian dishes */}
+              <View style={styles.sectionHeader}>
+                <RText variant="h4">Craving something?</RText>
+                <Caption color={colors.textSecondary}>Malaysian favourites</Caption>
+              </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cravingRow}>
+                {POPULAR_MY_DISHES.map(d => (
+                  <TouchableOpacity
+                    key={d.name}
+                    onPress={() => openDishByName(d.name)}
+                    activeOpacity={0.85}
+                  >
+                    <LinearGradient colors={d.gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.cravingCard}>
+                      <RText style={{ fontSize: 30, lineHeight: 36 }}>{d.emoji}</RText>
+                      <RText style={styles.cravingLabel} numberOfLines={2}>{d.name}</RText>
+                    </LinearGradient>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
@@ -391,13 +479,12 @@ export default function ExploreScreen() {
                   </Caption>
                 </View>
               ) : (
-                <View style={styles.dishResultList}>
+                <View style={styles.dishHeroList}>
                   {(dishRestaurants ?? []).map((entry, idx) => (
-                    <DishRestaurantRow
+                    <DishHeroCard
                       key={entry.id}
                       entry={entry}
                       rank={idx + 1}
-                      dishName={activeDish.name}
                     />
                   ))}
                 </View>
@@ -412,65 +499,74 @@ export default function ExploreScreen() {
 
 // ─── Dish restaurant row ──────────────────────────────────────
 
-function DishRestaurantRow({
-  entry, rank, dishName,
-}: {
-  entry: RestaurantDishEntry;
-  rank: number;
-  dishName: string;
-}) {
+// Large hero card for dish results — spacious and photo-forward, not a cramped list.
+function DishHeroCard({ entry, rank }: { entry: RestaurantDishEntry; rank: number }) {
   const restaurant = entry.restaurant as Restaurant | undefined;
   if (!restaurant) return null;
 
-  const MEDAL_COLORS = ['#F4B942', '#9CA3AF', '#CD7F32'];
   const isMedal = rank <= 3;
+  const medal = ['🥇', '🥈', '🥉'][rank - 1];
+  const score = entry.average_rating > 0 ? entry.average_rating : restaurant.overall_rating ?? 0;
 
   return (
     <TouchableOpacity
-      style={styles.dishResultRow}
-      onPress={() => router.push(`/restaurant/${restaurant.id}`)}
-      activeOpacity={0.8}
+      style={styles.dishHero}
+      onPress={() => router.push(`/restaurant/${restaurant.slug ?? restaurant.id}`)}
+      activeOpacity={0.92}
     >
-      <View style={styles.dishResultRank}>
-        {isMedal ? (
-          <RText style={{ fontSize: 20, lineHeight: 28 }}>{['🥇', '🥈', '🥉'][rank - 1]}</RText>
-        ) : (
-          <RText style={{ fontSize: 14, fontWeight: '800', color: colors.textTertiary }}>#{rank}</RText>
-        )}
-      </View>
-
       {restaurant.cover_photo_url ? (
-        <Image
-          source={{ uri: restaurant.cover_photo_url }}
-          style={styles.dishResultPhoto}
-          contentFit="cover"
-        />
+        <Image source={{ uri: restaurant.cover_photo_url }} style={styles.dishHeroPhoto} contentFit="cover" transition={250} />
       ) : (
-        <View style={[styles.dishResultPhoto, { backgroundColor: colors.gray100, alignItems: 'center', justifyContent: 'center' }]}>
-          <Ionicons name="restaurant" size={20} color={colors.gray300} />
-        </View>
+        <LinearGradient colors={['#3A2A22', '#1C1512']} style={styles.dishHeroPhoto}>
+          <View style={styles.dishHeroFallback}>
+            <RText style={{ fontSize: 44, lineHeight: 54 }}>
+              {DISH_CATEGORY_EMOJI[restaurantDishEmojiKey(restaurant.category)] ?? '🍽️'}
+            </RText>
+          </View>
+        </LinearGradient>
       )}
+      <LinearGradient colors={['rgba(0,0,0,0.15)', 'rgba(0,0,0,0.85)']} style={StyleSheet.absoluteFill as any} />
 
-      <View style={styles.dishResultInfo}>
-        <RText variant="titleSmall" numberOfLines={1}>{restaurant.name}</RText>
-        <Caption color={colors.textSecondary} numberOfLines={1}>
-          {restaurant.area ?? restaurant.city} · {restaurant.category?.replace(/_/g, ' ')}
-        </Caption>
+      {/* Rank chip */}
+      <View style={styles.dishHeroRank}>
+        {isMedal ? (
+          <RText style={{ fontSize: 22, lineHeight: 28 }}>{medal}</RText>
+        ) : (
+          <RText style={{ fontSize: 15, fontWeight: '900', color: colors.white }}>#{rank}</RText>
+        )}
       </View>
 
-      <View style={styles.dishResultScore}>
-        <RText style={{ fontSize: 13, lineHeight: 18 }}>⭐</RText>
-        <RText style={{ fontSize: 15, fontWeight: '800', color: isMedal ? MEDAL_COLORS[rank - 1] : colors.textPrimary, marginLeft: 3 }}>
-          {entry.average_rating > 0 ? entry.average_rating.toFixed(1) : restaurant.overall_rating?.toFixed(1) ?? '—'}
-        </RText>
-        {entry.rating_count > 0 && (
-          <Caption color={colors.textSecondary} style={{ marginLeft: 3 }}>
-            ({entry.rating_count})
-          </Caption>
-        )}
+      {/* Bottom content */}
+      <View style={styles.dishHeroContent}>
+        <RText variant="h3" color={colors.white} numberOfLines={1}>{restaurant.name}</RText>
+        <View style={styles.dishHeroMeta}>
+          <View style={styles.dishHeroScore}>
+            <RText style={{ fontSize: 13, lineHeight: 17 }}>⭐</RText>
+            <RText style={{ fontSize: 15, fontWeight: '800', color: colors.white, marginLeft: 4 }}>
+              {score > 0 ? score.toFixed(1) : '—'}
+            </RText>
+            {entry.rating_count > 0 && (
+              <RText style={{ fontSize: 12, color: colors.whiteTransparent80, marginLeft: 4 }}>
+                ({entry.rating_count})
+              </RText>
+            )}
+          </View>
+          <RText variant="bodySmall" color={colors.whiteTransparent80} numberOfLines={1} style={{ flex: 1 }}>
+            {restaurant.area ?? restaurant.city} · {restaurant.category?.replace(/_/g, ' ')}
+          </RText>
+        </View>
       </View>
     </TouchableOpacity>
   );
+}
+
+// Maps a restaurant category to a rough dish-emoji bucket for the fallback tile.
+function restaurantDishEmojiKey(cat?: string): string {
+  switch (cat) {
+    case 'cafe': case 'kopitiam': return 'drinks';
+    case 'night_market': case 'food_court': case 'hawker': return 'noodles';
+    default: return 'other';
+  }
 }
 
 // ─── People content ───────────────────────────────────────────
@@ -745,6 +841,51 @@ const styles = StyleSheet.create({
     paddingTop: spacing[2],
   },
 
+  // Craving / curated dishes (category-style cards)
+  cravingRow: {
+    paddingHorizontal: spacing[4],
+    gap: spacing[3],
+    paddingBottom: spacing[2],
+  },
+  cravingCard: {
+    width: 116,
+    height: 116,
+    borderRadius: radius.xl,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing[2],
+    gap: spacing[1],
+  },
+  cravingLabel: {
+    color: colors.white,
+    fontSize: 13,
+    fontWeight: '800',
+    textAlign: 'center',
+    lineHeight: 16,
+  },
+
+  // Near me
+  nearMeCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing[4],
+    marginBottom: spacing[3],
+    padding: spacing[4],
+    borderRadius: radius.xl,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    gap: spacing[3],
+  },
+  nearMeIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
   // Category grid
   categoryGrid: {
     flexDirection: 'row',
@@ -818,34 +959,53 @@ const styles = StyleSheet.create({
     marginBottom: spacing[2],
   },
 
-  // Dish restaurant result list
-  dishResultList: {
-    paddingBottom: spacing[4],
-  },
-  dishResultRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  // Dish result hero cards
+  dishHeroList: {
     paddingHorizontal: spacing[4],
-    paddingVertical: spacing[3],
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
+    paddingBottom: spacing[4],
     gap: spacing[3],
   },
-  dishResultRank: {
-    width: 32,
+  dishHero: {
+    height: 172,
+    borderRadius: radius.xl,
+    overflow: 'hidden',
+    backgroundColor: colors.gray100,
+    justifyContent: 'flex-end',
+  },
+  dishHeroPhoto: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+  },
+  dishHeroFallback: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  dishHeroRank: {
+    position: 'absolute',
+    top: spacing[3],
+    left: spacing[3],
+    minWidth: 36,
+    height: 36,
+    paddingHorizontal: spacing[2],
+    borderRadius: radius.full,
+    backgroundColor: 'rgba(0,0,0,0.45)',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  dishResultPhoto: {
-    width: 52,
-    height: 52,
-    borderRadius: radius.lg,
+  dishHeroContent: {
+    padding: spacing[4],
   },
-  dishResultInfo: {
-    flex: 1,
-  },
-  dishResultScore: {
+  dishHeroMeta: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing[3],
+    marginTop: spacing[1],
+  },
+  dishHeroScore: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    paddingHorizontal: spacing[2],
+    paddingVertical: 3,
+    borderRadius: radius.sm,
   },
 
   // People tab
