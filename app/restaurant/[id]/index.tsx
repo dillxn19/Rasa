@@ -6,11 +6,6 @@ import {
   TouchableOpacity,
   Dimensions,
   Linking,
-  Modal,
-  TextInput,
-  KeyboardAvoidingView,
-  Platform,
-  Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -22,16 +17,20 @@ import * as Haptics from 'expo-haptics';
 import { colors, spacing, radius, shadows } from '@/theme';
 import { RText, H2, H3, H4, Body, Caption } from '@/components/ui/Text';
 import { Avatar } from '@/components/ui/Avatar';
-import { StarRating, RatingPicker } from '@/components/ui/StarRating';
+import { StarRating } from '@/components/ui/StarRating';
 import { Button } from '@/components/ui/Button';
 import { useAuthStore, selectCurrentUserId } from '@/stores/authStore';
 import {
-  getRestaurantById, getRestaurantReviews, getRestaurantPhotos,
+  getRestaurantByIdOrSlug, getRestaurantReviews, getRestaurantPhotos,
   getPopularDishes, getFriendReviews, saveRestaurant, unsaveRestaurant,
-  submitReview,
 } from '@/services/restaurants';
 import { getRestaurantFoodTags, toggleFoodTag } from '@/services/dishes';
+import { getUserCoins } from '@/services/coins';
+import { useFeatureAccess, unlockWithCoins, FEATURES, type FeatureDef } from '@/services/features';
+import { shareInvite } from '@/lib/referral';
+import { FeatureGateModal } from '@/components/ui/FeatureGateModal';
 import { FoodTagList } from '@/components/ui/FoodTag';
+import { toast } from '@/stores/toastStore';
 import { queryKeys } from '@/lib/queryClient';
 import type { Review } from '@/types';
 import { CATEGORY_LABELS, DIETARY_LABELS, PRICE_LABELS, type FoodTagType } from '@/types';
@@ -47,64 +46,87 @@ export default function RestaurantScreen() {
   const userId = useAuthStore(selectCurrentUserId);
   const qc = useQueryClient();
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
-  const [showRatingModal, setShowRatingModal] = useState(false);
-  const [reviewRating, setReviewRating] = useState(0);
-  const [reviewText, setReviewText] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { isUnlocked, referralCount } = useFeatureAccess();
+  const [gate, setGate] = useState<FeatureDef | null>(null);
+  const friendsUnlocked = isUnlocked('friends_ratings');
 
-  const { data: restaurant, isLoading } = useQuery({
+  const { data: coins = 0 } = useQuery({
+    queryKey: ['userCoins', profile?.id],
+    queryFn: () => getUserCoins(profile!.id),
+    enabled: !!profile,
+    staleTime: 1000 * 30,
+  });
+
+  const handleUnlockWithCoins = async (feature: FeatureDef) => {
+    if (!profile) return;
+    const result = await unlockWithCoins(profile.id, feature);
+    if (result.success) {
+      qc.invalidateQueries({ queryKey: ['featureUnlocks', profile.id] });
+      qc.invalidateQueries({ queryKey: ['userCoins', profile.id] });
+      toast.success(result.message);
+      setGate(null);
+    } else {
+      toast.error(result.message);
+    }
+  };
+
+  const { data: restaurant, isLoading, isError } = useQuery({
     queryKey: queryKeys.restaurant(id),
-    queryFn: () => getRestaurantById(id, profile?.id),
+    queryFn: () => getRestaurantByIdOrSlug(id, profile?.id),
     enabled: !!id,
   });
 
+  // `id` from the URL may be a slug; `rid` is always the resolved UUID used for
+  // all downstream queries and mutations.
+  const rid = restaurant?.id ?? '';
+
   const { data: reviews } = useQuery({
-    queryKey: queryKeys.restaurantReviews(id),
-    queryFn: () => getRestaurantReviews(id),
-    enabled: !!id,
+    queryKey: queryKeys.restaurantReviews(rid),
+    queryFn: () => getRestaurantReviews(rid),
+    enabled: !!rid,
   });
 
   const { data: photos } = useQuery({
-    queryKey: queryKeys.restaurantPhotos(id),
-    queryFn: () => getRestaurantPhotos(id),
-    enabled: !!id,
+    queryKey: queryKeys.restaurantPhotos(rid),
+    queryFn: () => getRestaurantPhotos(rid),
+    enabled: !!rid,
   });
 
   const { data: dishes } = useQuery({
-    queryKey: ['dishes', id],
-    queryFn: () => getPopularDishes(id),
-    enabled: !!id,
+    queryKey: ['dishes', rid],
+    queryFn: () => getPopularDishes(rid),
+    enabled: !!rid,
   });
 
   const { data: friendReviews } = useQuery({
-    queryKey: ['friend-reviews', id],
-    queryFn: () => getFriendReviews(id, profile!.id),
-    enabled: !!id && !!profile,
+    queryKey: ['friend-reviews', rid],
+    queryFn: () => getFriendReviews(rid, profile!.id),
+    enabled: !!rid && !!profile,
   });
 
   const { data: foodTags } = useQuery({
-    queryKey: ['restaurant-tags', id, userId],
-    queryFn: () => getRestaurantFoodTags(id, userId),
-    enabled: !!id,
+    queryKey: ['restaurant-tags', rid, userId],
+    queryFn: () => getRestaurantFoodTags(rid, userId),
+    enabled: !!rid,
   });
 
   const tagMutation = useMutation({
     mutationFn: (tag: FoodTagType) => {
-      if (!userId) return Promise.resolve({ added: false });
-      return toggleFoodTag(userId, id, tag);
+      if (!userId || !rid) return Promise.resolve({ added: false });
+      return toggleFoodTag(userId, rid, tag);
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['restaurant-tags', id, userId] });
+      qc.invalidateQueries({ queryKey: ['restaurant-tags', rid, userId] });
     },
   });
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      if (!profile) return;
+      if (!profile || !rid) return;
       if (restaurant?.is_saved) {
-        await unsaveRestaurant(profile.id, id);
+        await unsaveRestaurant(profile.id, rid);
       } else {
-        await saveRestaurant(profile.id, id);
+        await saveRestaurant(profile.id, rid);
       }
     },
     onSuccess: () => {
@@ -127,46 +149,35 @@ export default function RestaurantScreen() {
 
   const handleDirections = () => {
     if (!restaurant) return;
-    if (restaurant.latitude && restaurant.longitude) {
-      const wazeUrl = getWazeUrl(restaurant.latitude, restaurant.longitude);
-      Linking.canOpenURL(wazeUrl).then(can => {
-        if (can) Linking.openURL(wazeUrl);
-        else {
-          const url = restaurant.google_maps_url ?? `https://maps.google.com/?q=${restaurant.latitude},${restaurant.longitude}`;
-          Linking.openURL(url);
-        }
-      });
-    } else if (restaurant.waze_url ?? restaurant.google_maps_url) {
-      Linking.openURL((restaurant.waze_url ?? restaurant.google_maps_url)!);
-    }
+    const query = encodeURIComponent(
+      restaurant.address
+        ? `${restaurant.name}, ${restaurant.address}`
+        : restaurant.name
+    );
+    // Try Google Maps app first, fall back to Google Maps website
+    Linking.canOpenURL('comgooglemaps://').then(hasGoogleMaps => {
+      if (hasGoogleMaps) {
+        Linking.openURL(`comgooglemaps://?q=${query}`);
+      } else {
+        Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${query}`);
+      }
+    });
   };
 
-  const handleSubmitReview = async () => {
-    if (!profile || reviewRating === 0) {
-      Alert.alert('Rating required', 'Please select a star rating before submitting.');
-      return;
-    }
-    setIsSubmitting(true);
-    try {
-      await submitReview({
-        user_id: profile.id,
-        restaurant_id: id,
-        rating: reviewRating,
-        content: reviewText.trim() || undefined,
-        is_public: true,
-      });
-      qc.invalidateQueries({ queryKey: queryKeys.restaurantReviews(id) });
-      qc.invalidateQueries({ queryKey: queryKeys.restaurant(id) });
-      setShowRatingModal(false);
-      setReviewRating(0);
-      setReviewText('');
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (e) {
-      Alert.alert('Error', 'Failed to submit review. Please try again.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+  if (isError) {
+    return (
+      <SafeAreaView style={[styles.container, { alignItems: 'center', justifyContent: 'center', padding: spacing[8] }]}>
+        <RText style={{ fontSize: 48, lineHeight: 58 }}>🍽️</RText>
+        <H4 style={{ marginTop: spacing[4] }}>Restaurant not found</H4>
+        <Caption color={colors.textSecondary} align="center" style={{ marginTop: spacing[2] }}>
+          This place may have been removed or the link is broken.
+        </Caption>
+        <TouchableOpacity style={styles.notFoundBtn} onPress={() => router.back()}>
+          <RText variant="labelMedium" color={colors.white}>Go back</RText>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
 
   if (isLoading || !restaurant) return null;
 
@@ -293,24 +304,48 @@ export default function RestaurantScreen() {
               </View>
 
               {friendReviews && friendReviews.length > 0 && (
-                <View style={styles.friendRatingCard}>
-                  <RText variant="labelSmall">FRIENDS</RText>
-                  <View style={styles.friendRatingRow}>
-                    {friendReviews.slice(0, 3).map(r => (
-                      <Avatar
-                        key={r.id}
-                        uri={r.user?.avatar_url}
-                        name={r.user?.display_name}
-                        size="xs"
-                        showBorder
-                        style={{ marginLeft: -6 }}
-                      />
-                    ))}
-                    <RText variant="titleSmall" style={{ marginLeft: spacing[2] }}>
-                      {(friendReviews.reduce((a, r) => a + r.rating, 0) / friendReviews.length).toFixed(1)}★
-                    </RText>
+                friendsUnlocked ? (
+                  <View style={styles.friendRatingCard}>
+                    <RText variant="labelSmall">FRIENDS</RText>
+                    <View style={styles.friendRatingRow}>
+                      {friendReviews.slice(0, 3).map(r => (
+                        <Avatar
+                          key={r.id}
+                          uri={r.user?.avatar_url}
+                          name={r.user?.display_name}
+                          size="xs"
+                          showBorder
+                          style={{ marginLeft: -6 }}
+                        />
+                      ))}
+                      <RText variant="titleSmall" style={{ marginLeft: spacing[2] }}>
+                        {(friendReviews.reduce((a, r) => a + r.rating, 0) / friendReviews.length).toFixed(1)}★
+                      </RText>
+                    </View>
                   </View>
-                </View>
+                ) : (
+                  // Locked teaser — the Beli "see how friends rated" mechanic sits
+                  // behind the friends_ratings referral unlock.
+                  <TouchableOpacity
+                    style={styles.friendLockedCard}
+                    onPress={() => setGate(FEATURES.friends_ratings)}
+                    activeOpacity={0.85}
+                  >
+                    <View style={styles.friendLockedAvatars}>
+                      {friendReviews.slice(0, 3).map(r => (
+                        <View key={r.id} style={styles.friendLockedAvatar}>
+                          <Avatar uri={r.user?.avatar_url} name={r.user?.display_name} size="xs" style={{ marginLeft: -6 }} />
+                        </View>
+                      ))}
+                    </View>
+                    <View style={styles.friendLockedRow}>
+                      <Ionicons name="lock-closed" size={12} color={colors.primary} />
+                      <RText variant="labelSmall" color={colors.primary} style={{ marginLeft: 4 }}>
+                        {friendReviews.length} {friendReviews.length === 1 ? 'friend' : 'friends'} rated
+                      </RText>
+                    </View>
+                  </TouchableOpacity>
+                )
               )}
             </View>
           </View>
@@ -318,8 +353,8 @@ export default function RestaurantScreen() {
           {/* Quick actions */}
           <View style={styles.quickActions}>
             <TouchableOpacity style={styles.quickAction} onPress={handleDirections}>
-              <RText style={{ fontSize: 20 }}>🗺️</RText>
-              <RText variant="labelMedium" color={colors.textSecondary}>Waze</RText>
+              <RText style={{ fontSize: 20 }}>📍</RText>
+              <RText variant="labelMedium" color={colors.textSecondary}>Maps</RText>
             </TouchableOpacity>
             {restaurant.phone_number && (
               <TouchableOpacity
@@ -349,7 +384,15 @@ export default function RestaurantScreen() {
           <View style={styles.reviewCTA}>
             <Button
               label="Rate this restaurant"
-              onPress={() => setShowRatingModal(true)}
+              onPress={() => router.push({
+                pathname: '/(tabs)/add',
+                params: {
+                  restaurantId: rid,
+                  restaurantName: restaurant.name,
+                  restaurantCategory: restaurant.category,
+                  restaurantCity: restaurant.city ?? '',
+                },
+              } as any)}
               fullWidth
               variant="primary"
               size="lg"
@@ -362,7 +405,7 @@ export default function RestaurantScreen() {
               <View style={styles.sectionHeader}>
                 <H4>Community Tags</H4>
                 {userId && (
-                  <TouchableOpacity onPress={() => router.push(`/restaurant/${id}/tags`)}>
+                  <TouchableOpacity onPress={() => router.push(`/restaurant/${rid}/tags`)}>
                     <Caption color={colors.primary}>+ Add tag</Caption>
                   </TouchableOpacity>
                 )}
@@ -443,54 +486,14 @@ export default function RestaurantScreen() {
         </View>
       </ScrollView>
 
-      {/* Inline rating modal */}
-      <Modal
-        visible={showRatingModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowRatingModal(false)}
-      >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowRatingModal(false)}
-        >
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-            <TouchableOpacity activeOpacity={1}>
-              <View style={styles.modalSheet}>
-                <View style={styles.modalHandle} />
-                <H4 style={{ marginBottom: spacing[2] }}>Rate {restaurant.name}</H4>
-                <Caption color={colors.textSecondary} style={{ marginBottom: spacing[5] }}>
-                  How was your experience?
-                </Caption>
-                <RatingPicker
-                  value={reviewRating}
-                  onChange={setReviewRating}
-                  size={40}
-                />
-                <TextInput
-                  style={styles.reviewInput}
-                  placeholder="Share your thoughts... (optional)"
-                  placeholderTextColor={colors.textTertiary}
-                  value={reviewText}
-                  onChangeText={setReviewText}
-                  multiline
-                  maxLength={500}
-                  textAlignVertical="top"
-                />
-                <Button
-                  label={isSubmitting ? 'Posting...' : 'Post Review'}
-                  onPress={handleSubmitReview}
-                  fullWidth
-                  variant="primary"
-                  size="lg"
-                  isLoading={isSubmitting}
-                />
-              </View>
-            </TouchableOpacity>
-          </KeyboardAvoidingView>
-        </TouchableOpacity>
-      </Modal>
+      <FeatureGateModal
+        feature={gate}
+        referralCount={referralCount}
+        coins={coins}
+        onClose={() => setGate(null)}
+        onUnlockWithCoins={handleUnlockWithCoins}
+        onInvite={() => { setGate(null); if (profile?.username) shareInvite(profile.username); }}
+      />
     </View>
   );
 }
@@ -539,6 +542,13 @@ function InfoRow({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label:
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
+  notFoundBtn: {
+    marginTop: spacing[6],
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing[6],
+    paddingVertical: spacing[3],
+    borderRadius: radius.full,
+  },
   heroContainer: { height: HEADER_HEIGHT, position: 'relative' },
   heroPhoto: { width: SCREEN_WIDTH, height: HEADER_HEIGHT },
   heroPlaceholder: { backgroundColor: colors.gray100, alignItems: 'center', justifyContent: 'center' },
@@ -607,6 +617,19 @@ const styles = StyleSheet.create({
     gap: spacing[1],
   },
   friendRatingRow: { flexDirection: 'row', alignItems: 'center', marginLeft: 6 },
+  friendLockedCard: {
+    backgroundColor: colors.primarySurface,
+    borderRadius: radius.xl,
+    padding: spacing[3],
+    alignItems: 'center',
+    gap: spacing[1],
+    borderWidth: 1,
+    borderColor: colors.primaryLight,
+    borderStyle: 'dashed',
+  },
+  friendLockedAvatars: { flexDirection: 'row', marginLeft: 6, opacity: 0.55 },
+  friendLockedAvatar: {},
+  friendLockedRow: { flexDirection: 'row', alignItems: 'center' },
   quickActions: {
     flexDirection: 'row',
     paddingHorizontal: spacing[4],
@@ -627,39 +650,6 @@ const styles = StyleSheet.create({
   reviewCTA: {
     paddingHorizontal: spacing[4],
     paddingVertical: spacing[4],
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalSheet: {
-    backgroundColor: colors.background,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: spacing[6],
-    paddingBottom: spacing[10],
-    alignItems: 'center',
-  },
-  modalHandle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.gray300,
-    marginBottom: spacing[5],
-  },
-  reviewInput: {
-    width: '100%',
-    minHeight: 100,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.xl,
-    padding: spacing[4],
-    marginTop: spacing[5],
-    marginBottom: spacing[5],
-    fontSize: 16,
-    color: colors.textPrimary,
-    backgroundColor: colors.gray50,
   },
   tagsSection: {
     paddingTop: spacing[5],

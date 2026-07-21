@@ -5,6 +5,8 @@ import { colors, spacing } from '@/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { RText } from '@/components/ui/Text';
+import { useCurrentUserSync } from '@/hooks/useCurrentUser';
+import { useTheme } from '@/theme/ThemeProvider';
 
 function TabBarIcon({
   name,
@@ -15,12 +17,13 @@ function TabBarIcon({
   focused: boolean;
   badge?: number;
 }) {
+  const theme = useTheme();
   return (
     <View style={styles.iconContainer}>
       <Ionicons
         name={focused ? name : (`${name}-outline` as keyof typeof Ionicons.glyphMap)}
         size={26}
-        color={focused ? colors.primary : colors.gray400}
+        color={focused ? theme.primary : colors.gray400}
       />
       {badge && badge > 0 ? (
         <View style={styles.badge}>
@@ -33,9 +36,10 @@ function TabBarIcon({
 
 // Custom add button
 function AddButton({ onPress }: { onPress: () => void }) {
+  const theme = useTheme();
   return (
     <TouchableOpacity
-      style={styles.addButton}
+      style={[styles.addButton, { backgroundColor: theme.primary, shadowColor: theme.primary }]}
       onPress={onPress}
       activeOpacity={0.85}
     >
@@ -46,6 +50,8 @@ function AddButton({ onPress }: { onPress: () => void }) {
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
+  const theme = useTheme();
+  useCurrentUserSync();
 
   return (
     <Tabs
@@ -59,7 +65,7 @@ export default function TabsLayout() {
           borderTopWidth: StyleSheet.hairlineWidth,
           elevation: 0,
         },
-        tabBarActiveTintColor: colors.primary,
+        tabBarActiveTintColor: theme.primary,
         tabBarInactiveTintColor: colors.gray400,
         tabBarShowLabel: true,
         tabBarLabelStyle: {
@@ -94,10 +100,10 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="activity"
+        name="leaderboard"
         options={{
-          title: 'Activity',
-          tabBarIcon: ({ focused }) => <TabBarIcon name="heart" focused={focused} />,
+          title: 'Ranks',
+          tabBarIcon: ({ focused }) => <TabBarIcon name="trophy" focused={focused} />,
         }}
       />
       <Tabs.Screen
@@ -106,6 +112,11 @@ export default function TabsLayout() {
           title: 'Profile',
           tabBarIcon: ({ focused }) => <TabBarIcon name="person" focused={focused} />,
         }}
+      />
+      {/* Activity is hidden from tab bar — accessible via bell icon on home */}
+      <Tabs.Screen
+        name="activity"
+        options={{ href: null }}
       />
     </Tabs>
   );

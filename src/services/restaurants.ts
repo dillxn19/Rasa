@@ -1,5 +1,48 @@
 import { supabase } from '@/lib/supabase';
-import type { Restaurant, Review, RestaurantPhoto, PopularDish, ReviewForm } from '@/types';
+import type { Restaurant, Review, RestaurantPhoto, PopularDish, ReviewForm, AlgoliaRestaurant } from '@/types';
+
+/**
+ * Direct-to-Postgres restaurant search. Used as a fallback when Algolia is
+ * unavailable, unconfigured, or returns nothing — so search never looks broken
+ * even if the index hasn't been seeded. Returns Algolia-shaped hits so callers
+ * can treat both sources identically.
+ */
+export async function searchRestaurantsSupabase(
+  query: string,
+  opts: { halalOnly?: boolean; limit?: number } = {},
+): Promise<AlgoliaRestaurant[]> {
+  if (query.trim().length < 2) return [];
+  let q = supabase
+    .from('restaurants')
+    .select('id, name, slug, category, cuisines, city, area, address, overall_rating, total_reviews, cover_photo_url, price_range, dietary_options')
+    .eq('is_approved', true)
+    .eq('is_active', true)
+    .or(`name.ilike.%${query}%,area.ilike.%${query}%,city.ilike.%${query}%`)
+    .order('popularity_score', { ascending: false })
+    .limit(opts.limit ?? 8);
+
+  if (opts.halalOnly) q = q.contains('dietary_options', ['halal_certified']);
+
+  const { data, error } = await q;
+  if (error) throw error;
+
+  return (data ?? []).map((r: any) => ({
+    objectID: r.id,
+    name: r.name,
+    slug: r.slug ?? '',
+    category: r.category,
+    cuisines: r.cuisines ?? [],
+    city: r.city ?? '',
+    area: r.area ?? '',
+    address: r.address ?? '',
+    overall_rating: r.overall_rating ?? 0,
+    total_reviews: r.total_reviews ?? 0,
+    cover_photo_url: r.cover_photo_url ?? '',
+    price_range: r.price_range ?? '',
+    dietary_options: r.dietary_options ?? [],
+    tags: [],
+  })) as AlgoliaRestaurant[];
+}
 
 // ─── Restaurant queries ───────────────────────────────────────
 
@@ -36,6 +79,19 @@ export async function getRestaurantBySlug(slug: string, userId?: string): Promis
   }
 
   return restaurant;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Resolves a restaurant by either its UUID or its slug. Navigation throughout
+ * the app pushes `/restaurant/<slug ?? id>`, so the detail screen can receive
+ * either form — this handles both transparently.
+ */
+export async function getRestaurantByIdOrSlug(idOrSlug: string, userId?: string): Promise<Restaurant> {
+  return UUID_RE.test(idOrSlug)
+    ? getRestaurantById(idOrSlug, userId)
+    : getRestaurantBySlug(idOrSlug, userId);
 }
 
 export async function getRestaurantById(id: string, userId?: string): Promise<Restaurant> {
@@ -148,6 +204,26 @@ export async function getExploreRestaurants(city?: string, page = 0): Promise<Re
   return (data as Restaurant[]) ?? [];
 }
 
+export async function getRestaurantsByCategory(
+  city: string,
+  category: string,
+  limit = 15,
+): Promise<Restaurant[]> {
+  const { data, error } = await supabase
+    .from('restaurants')
+    .select('*')
+    .eq('is_approved', true)
+    .eq('is_active', true)
+    .eq('city', city)
+    .eq('category', category)
+    .order('popularity_score', { ascending: false })
+    .order('overall_rating', { ascending: false })
+    .limit(limit);
+
+  if (error) throw error;
+  return (data as Restaurant[]) ?? [];
+}
+
 export async function getTrendingRestaurants(city: string, limit = 10): Promise<Restaurant[]> {
   const { data, error } = await supabase
     .from('restaurants')
@@ -185,6 +261,16 @@ export async function logVisit(userId: string, restaurantId: string): Promise<vo
     .from('visits')
     .insert({ user_id: userId, restaurant_id: restaurantId });
   if (error && !error.message.includes('duplicate')) throw error;
+}
+
+export async function getUserReviewForRestaurant(userId: string, restaurantId: string): Promise<Review | null> {
+  const { data } = await supabase
+    .from('reviews')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('restaurant_id', restaurantId)
+    .maybeSingle();
+  return data as Review | null;
 }
 
 export async function submitReview(form: ReviewForm): Promise<Review> {

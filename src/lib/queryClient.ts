@@ -78,3 +78,39 @@ export const queryKeys = {
   featuredTrails: () => ['trails', 'featured'] as const,
   userFollowedTrails: (userId: string) => ['trails', 'following', userId] as const,
 } as const;
+
+/**
+ * Single source of truth for cache invalidation after a review is submitted.
+ * BOTH review entry points (the Add tab and the inline restaurant modal) MUST
+ * call this — do not hand-roll invalidateQueries lists, they drift and cause
+ * stale counts on the profile / leaderboard / passport.
+ *
+ * Uses prefix keys so it works regardless of whether a screen keyed its
+ * restaurant query by UUID or slug.
+ */
+export function invalidateAfterReview(
+  qc: QueryClient,
+  userId: string,
+  restaurantId?: string,
+): void {
+  // Canonical current-user resource (mirrored into the auth store) — refreshing
+  // this updates total_reviews/counts everywhere at once.
+  qc.invalidateQueries({ queryKey: queryKeys.currentUser() });
+
+  // Everything user-scoped: reviews, passport, badges, visits, lists all live
+  // under ['user', userId, ...]
+  qc.invalidateQueries({ queryKey: ['user', userId] });
+  qc.invalidateQueries({ queryKey: ['userCoins', userId] });
+  qc.invalidateQueries({ queryKey: ['userReviewedIds', userId] });
+  qc.invalidateQueries({ queryKey: queryKeys.savedRestaurants(userId) });
+
+  // Global surfaces that reflect review counts
+  qc.invalidateQueries({ queryKey: ['leaderboard'] });
+  qc.invalidateQueries({ queryKey: queryKeys.homeFeed() });
+
+  // The reviewed restaurant + its reviews. Broad 'restaurant' prefix covers both
+  // id- and slug-keyed detail queries.
+  if (restaurantId) {
+    qc.invalidateQueries({ queryKey: ['restaurant'] });
+  }
+}

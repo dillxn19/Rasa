@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import {
   View, ScrollView, StyleSheet, TouchableOpacity,
-  Share, ActivityIndicator, Alert,
+  Share, ActivityIndicator,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -17,6 +17,7 @@ import { DishRankingList } from '@/components/dishes/DishRanking';
 import { getDishBySlug, getDishById, rateDish, saveDish, unsaveDish } from '@/services/dishes';
 import { queryKeys } from '@/lib/queryClient';
 import { useAuthStore, selectCurrentUserId } from '@/stores/authStore';
+import { toast } from '@/stores/toastStore';
 import type { Dish } from '@/types';
 import { MEAL_TIME_LABELS, CUISINE_LABELS } from '@/types';
 
@@ -68,7 +69,7 @@ export default function DishScreen() {
       qc.invalidateQueries({ queryKey: queryKeys.dish(id!) });
       setShowRatingModal(false);
       setRatingNote('');
-      Alert.alert('Thanks!', 'Your dish rating has been saved.');
+      toast.success('Your dish rating has been saved.', 'Thanks!');
     },
   });
 
@@ -169,11 +170,13 @@ export default function DishScreen() {
         {/* Rating summary */}
         <View style={styles.ratingCard}>
           <View style={styles.ratingMain}>
-            <RText style={typography.special.rating}>{dish.average_rating.toFixed(1)}</RText>
+            <RText style={{ fontSize: 36, fontWeight: '800', color: colors.textPrimary, lineHeight: 44 }}>
+              {dish.average_rating != null ? dish.average_rating.toFixed(1) : '—'}
+            </RText>
             <View style={styles.ratingDetails}>
-              <StarRating value={dish.average_rating} size={18} readonly />
+              <StarRating value={dish.average_rating ?? 0} size={18} readonly />
               <Caption style={{ marginTop: spacing[1] }}>
-                {dish.total_ratings.toLocaleString()} ratings · {dish.total_restaurant_count} restaurants
+                {(dish.total_ratings ?? 0).toLocaleString()} ratings · {dish.total_restaurant_count ?? 0} restaurants
               </Caption>
             </View>
           </View>

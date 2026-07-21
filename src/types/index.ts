@@ -169,6 +169,7 @@ export interface OnboardingForm {
 }
 
 export interface ReviewForm {
+  user_id: string;
   restaurant_id: string;
   rating: number;
   content?: string;

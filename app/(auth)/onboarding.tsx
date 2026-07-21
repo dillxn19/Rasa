@@ -7,7 +7,6 @@ import {
   FlatList,
   Dimensions,
   TextInput,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
@@ -19,10 +18,13 @@ import Animated, {
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { colors, spacing, radius, typography } from '@/theme';
+import { toast } from '@/stores/toastStore';
 import { Button } from '@/components/ui/Button';
 import { RText, H2, Body, Caption } from '@/components/ui/Text';
 import { useAuthStore } from '@/stores/authStore';
 import { supabase } from '@/lib/supabase';
+import { getPendingReferrer, clearPendingReferrer } from '@/lib/referral';
+import { recordReferral } from '@/services/referrals';
 import {
   CuisineType, DietaryOption, CUISINE_LABELS, DIETARY_LABELS, MALAYSIA_CITIES,
 } from '@/types';
@@ -100,9 +102,20 @@ export default function OnboardingScreen() {
         .eq('id', profile.id);
 
       await refreshProfile();
+
+      // If this user arrived via someone's invite link, record the referral now
+      // that their profile (username) exists. Fire-and-forget — never block entry.
+      try {
+        const ref = await getPendingReferrer();
+        if (ref && ref !== username.toLowerCase().trim()) {
+          await recordReferral(ref, profile.id);
+        }
+        await clearPendingReferrer();
+      } catch { /* non-fatal */ }
+
       router.replace('/(tabs)');
     } catch (error) {
-      Alert.alert('Error', 'Failed to save profile. Please try again.');
+      toast.error('Failed to save profile. Please try again.');
     } finally {
       setIsLoading(false);
     }

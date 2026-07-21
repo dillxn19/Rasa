@@ -75,7 +75,7 @@ export default function FollowingScreen() {
           )}
           ListEmptyComponent={
             <View style={styles.emptyState}>
-              <RText style={{ fontSize: 40 }}>👀</RText>
+              <RText style={{ fontSize: 40, lineHeight: 52 }}>👀</RText>
               <RText variant="titleMedium" style={{ marginTop: spacing[3] }}>Not following anyone</RText>
               <Caption color={colors.textSecondary}>
                 {username} hasn't followed anyone yet.

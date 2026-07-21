@@ -131,17 +131,27 @@ export async function searchLists(query: string, page = 0): Promise<List[]> {
 }
 
 export async function multiSearch(query: string) {
+  // Each source fails independently so one misconfigured index can't blank the
+  // whole search. Restaurants additionally fall back to Postgres.
   const [restaurants, users, lists] = await Promise.all([
-    searchRestaurants({ query, hitsPerPage: 6 }),
-    searchUsers(query),
-    searchLists(query),
+    searchRestaurants({ query, hitsPerPage: 6 })
+      .then(r => r.hits)
+      .catch(() => [] as AlgoliaRestaurant[]),
+    searchUsers(query).catch(() => [] as User[]),
+    searchLists(query).catch(() => [] as List[]),
   ]);
 
+  let restaurantHits = restaurants;
+  if (restaurantHits.length === 0) {
+    const { searchRestaurantsSupabase } = await import('@/services/restaurants');
+    restaurantHits = await searchRestaurantsSupabase(query, { limit: 6 }).catch(() => []);
+  }
+
   return {
-    restaurants: restaurants.hits,
+    restaurants: restaurantHits,
     users,
     lists,
-    total: restaurants.nbHits + users.length + lists.length,
+    total: restaurantHits.length + users.length + lists.length,
     query,
   };
 }

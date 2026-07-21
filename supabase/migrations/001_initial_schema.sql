@@ -240,10 +240,8 @@ CREATE TABLE visits (
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   restaurant_id UUID NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
   visited_at TIMESTAMPTZ DEFAULT NOW(),
-  note TEXT,
-  UNIQUE(user_id, restaurant_id, visited_at::DATE)
+  note TEXT
 );
-
 CREATE INDEX idx_visits_user ON visits(user_id, visited_at DESC);
 CREATE INDEX idx_visits_restaurant ON visits(restaurant_id);
 

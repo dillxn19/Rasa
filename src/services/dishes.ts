@@ -67,6 +67,19 @@ export async function getTopRestaurantsForDish(dishId: string, limit = 10): Prom
   return data as RestaurantDishEntry[];
 }
 
+export async function getTopDishes(limit = 10): Promise<Dish[]> {
+  const { data, error } = await supabase
+    .from('dishes')
+    .select('*')
+    .gte('total_ratings', 1)
+    .order('average_rating', { ascending: false })
+    .order('total_ratings', { ascending: false })
+    .limit(limit);
+
+  if (error || !data) return [];
+  return data as Dish[];
+}
+
 export async function getFeaturedDishes(limit = 12): Promise<Dish[]> {
   const { data, error } = await supabase
     .from('dishes')

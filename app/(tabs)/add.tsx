@@ -1,25 +1,30 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, StyleSheet, ScrollView, TextInput, TouchableOpacity,
-  Alert, Image as RNImage, KeyboardAvoidingView, Platform, ActivityIndicator,
+  Image as RNImage, KeyboardAvoidingView, Platform, ActivityIndicator,
+  Keyboard,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Animated, { useSharedValue, withSpring, useAnimatedStyle } from 'react-native-reanimated';
 import { colors, spacing, radius, shadows } from '@/theme';
 import { RText, H4, Caption } from '@/components/ui/Text';
 import { Button } from '@/components/ui/Button';
+import { Avatar } from '@/components/ui/Avatar';
 import { RatingPicker } from '@/components/ui/StarRating';
 import { useAuthStore } from '@/stores/authStore';
 import { useSettingsStore } from '@/stores/settingsStore';
-import { submitReview } from '@/services/restaurants';
-import { uploadReviewPhoto } from '@/lib/supabase';
+import { submitReview, getUserReviewForRestaurant, unsaveRestaurant, searchRestaurantsSupabase } from '@/services/restaurants';
+import { awardReviewRewards } from '@/services/rewards';
+import { ReviewSuccessOverlay, type ReviewSuccessData } from '@/components/ui/ReviewSuccessOverlay';
+import { toast } from '@/stores/toastStore';
+import { uploadReviewPhoto, supabase } from '@/lib/supabase';
 import { searchRestaurants } from '@/lib/algolia';
-import { queryKeys } from '@/lib/queryClient';
+import { invalidateAfterReview } from '@/lib/queryClient';
 import type { AlgoliaRestaurant } from '@/types';
 import { CATEGORY_LABELS } from '@/types';
 
@@ -44,9 +49,18 @@ export default function AddReviewScreen() {
   const { profile } = useAuthStore();
   const { halalOnly } = useSettingsStore();
   const qc = useQueryClient();
+  const insets = useSafeAreaInsets();
+
+  // URL params for pre-selected restaurant (from restaurant screen "Rate" button)
+  const { restaurantId: preId, restaurantName: preName, restaurantCategory: preCat, restaurantCity: preCity } =
+    useLocalSearchParams<{ restaurantId?: string; restaurantName?: string; restaurantCategory?: string; restaurantCity?: string }>();
 
   // Step state
   const [step, setStep] = useState<Step>('restaurant');
+  const [addTab, setAddTab] = useState<'places' | 'people'>('places');
+  const [peopleQuery, setPeopleQuery] = useState('');
+  const [debouncedPeopleQuery, setDebouncedPeopleQuery] = useState('');
+  const peopleDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Form state
   const [restaurant, setRestaurant] = useState<AlgoliaRestaurant | null>(null);
@@ -56,6 +70,7 @@ export default function AddReviewScreen() {
   const [isPublic, setIsPublic] = useState(true);
   const [mealTag, setMealTag] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [success, setSuccess] = useState<ReviewSuccessData | null>(null);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -63,10 +78,94 @@ export default function AddReviewScreen() {
   const [isSearching, setIsSearching] = useState(false);
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Existing review check (rating step)
+  const { data: existingReview } = useQuery({
+    queryKey: ['userReview', profile?.id, restaurant?.objectID],
+    queryFn: () => getUserReviewForRestaurant(profile!.id, restaurant!.objectID),
+    enabled: !!profile && !!restaurant && step === 'rate',
+  });
+
+  // Reviewed restaurant IDs (search step — to show checkmarks)
+  const { data: reviewedIds } = useQuery({
+    queryKey: ['userReviewedIds', profile?.id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('reviews')
+        .select('restaurant_id')
+        .eq('user_id', profile!.id);
+      return new Set((data ?? []).map((r: { restaurant_id: string }) => r.restaurant_id));
+    },
+    enabled: !!profile && step === 'restaurant',
+    staleTime: 60_000,
+  });
+
+  // Saved restaurant IDs (search step — to show bookmark indicators)
+  const { data: savedIds } = useQuery({
+    queryKey: ['userSavedIds', profile?.id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('saved_restaurants')
+        .select('restaurant_id')
+        .eq('user_id', profile!.id);
+      return new Set((data ?? []).map((r: { restaurant_id: string }) => r.restaurant_id));
+    },
+    enabled: !!profile && step === 'restaurant',
+    staleTime: 60_000,
+  });
+
+  // People search
+  const { data: peopleResults = [], isLoading: peopleSearching } = useQuery({
+    queryKey: ['addPeopleSearch', debouncedPeopleQuery],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('users')
+        .select('id, username, display_name, avatar_url, city, total_reviews')
+        .or(`display_name.ilike.%${debouncedPeopleQuery}%,username.ilike.%${debouncedPeopleQuery}%`)
+        .eq('is_active', true)
+        .neq('id', profile?.id ?? '')
+        .order('total_reviews', { ascending: false })
+        .limit(20);
+      return data ?? [];
+    },
+    enabled: debouncedPeopleQuery.length >= 2 && addTab === 'people' && step === 'restaurant',
+  });
+
+  const handlePeopleSearch = (text: string) => {
+    setPeopleQuery(text);
+    if (peopleDebounceRef.current) clearTimeout(peopleDebounceRef.current);
+    peopleDebounceRef.current = setTimeout(() => setDebouncedPeopleQuery(text), 250);
+  };
+
+  // Pre-select restaurant from URL params (e.g. when navigated from restaurant screen)
+  useEffect(() => {
+    if (preId && preName && step === 'restaurant' && !restaurant) {
+      const pre: AlgoliaRestaurant = {
+        objectID: preId,
+        name: preName,
+        slug: '',
+        category: (preCat ?? 'restaurant') as AlgoliaRestaurant['category'],
+        cuisines: [],
+        city: preCity ?? '',
+        area: '',
+        address: '',
+        overall_rating: 0,
+        total_reviews: 0,
+        cover_photo_url: '',
+        price_range: '' as AlgoliaRestaurant['price_range'],
+        dietary_options: [],
+        tags: [],
+      };
+      setRestaurant(pre);
+      setStep('rate');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preId, preName]);
+
   const submitMutation = useMutation({
     mutationFn: async () => {
       if (!profile || !restaurant || rating === 0) return;
       await submitReview({
+        user_id: profile.id,
         restaurant_id: restaurant.objectID,
         rating,
         content: content.trim() || undefined,
@@ -74,14 +173,38 @@ export default function AddReviewScreen() {
         is_public: isPublic,
       });
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('Posted! 🎉', 'Your review is live.', [
-        { text: 'Done', onPress: () => { router.push('/(tabs)'); reset(); } },
-      ]);
-      qc.invalidateQueries({ queryKey: queryKeys.homeFeed() });
+      if (!profile || !restaurant) return;
+      const rid = restaurant.objectID;
+
+      // Award coins + advance the weekly streak, capturing the summary to show.
+      // `existingReview` (loaded on the rate step) tells us whether this is an
+      // edit — edits earn nothing, preventing coin farming.
+      const rewards = await awardReviewRewards(profile.id, rid, restaurant.name, {
+        isNewReview: !existingReview,
+      }).catch(() => null);
+
+      // Auto-remove bookmark now that it's been rated
+      if (savedIds?.has(rid)) {
+        unsaveRestaurant(profile.id, rid).catch(() => {});
+      }
+
+      // Single source of truth: refresh everything that shows review counts
+      invalidateAfterReview(qc, profile.id, rid);
+
+      setSuccess({
+        coinsEarned: rewards?.coinsEarned ?? (existingReview ? 0 : 25),
+        streakWeeks: rewards?.streakWeeks ?? null,
+        isNewWeek: rewards?.isNewWeek ?? false,
+        isMilestone: rewards?.isMilestone ?? false,
+        isFirstReview: rewards?.isFirstReview ?? false,
+        isEdit: rewards?.isEdit ?? !!existingReview,
+        cappedDaily: rewards?.cappedDaily ?? false,
+        restaurantName: restaurant.name,
+      });
     },
-    onError: () => Alert.alert('Error', 'Could not post. Try again.'),
+    onError: () => toast.error('Could not post your review. Try again.'),
   });
 
   function reset() {
@@ -108,9 +231,17 @@ export default function AddReviewScreen() {
           hitsPerPage: 8,
           ...(halalOnly ? { dietary: ['halal_certified'] } : {}),
         });
-        setSearchResults(result.hits);
+        // Fall back to Postgres when Algolia has no hits (e.g. index not seeded).
+        if (result.hits.length > 0) {
+          setSearchResults(result.hits);
+        } else {
+          const fb = await searchRestaurantsSupabase(query, { halalOnly }).catch(() => []);
+          setSearchResults(fb);
+        }
       } catch {
-        setSearchResults([]);
+        // Algolia errored/unconfigured — go straight to Postgres.
+        const fb = await searchRestaurantsSupabase(query, { halalOnly }).catch(() => []);
+        setSearchResults(fb);
       } finally {
         setIsSearching(false);
       }
@@ -119,7 +250,7 @@ export default function AddReviewScreen() {
 
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       allowsMultipleSelection: true,
       quality: 0.8,
       selectionLimit: 5,
@@ -130,12 +261,14 @@ export default function AddReviewScreen() {
       try {
         for (const asset of result.assets) {
           const response = await fetch(asset.uri);
-          const blob = await response.blob();
-          const url = await uploadReviewPhoto(profile.id, blob);
+          const arrayBuffer = await response.arrayBuffer();
+          const ext = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
+          const mime = ext === 'png' ? 'image/png' : ext === 'heic' ? 'image/heic' : 'image/jpeg';
+          const url = await uploadReviewPhoto(profile.id, arrayBuffer, mime);
           setPhotos(prev => [...prev, url]);
         }
-      } catch {
-        Alert.alert('Upload failed', 'Could not upload photos.');
+      } catch (e: any) {
+        toast.error(e?.message ?? 'Could not upload photos.', 'Upload failed');
       } finally {
         setUploading(false);
       }
@@ -145,27 +278,29 @@ export default function AddReviewScreen() {
   const takePhoto = async () => {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('Camera access needed', 'Allow camera access in Settings.');
+      toast.error('Allow camera access in Settings.', 'Camera access needed');
       return;
     }
     const result = await ImagePicker.launchCameraAsync({ quality: 0.8 });
     if (!result.canceled && profile) {
       setUploading(true);
       try {
-        const response = await fetch(result.assets[0].uri);
-        const blob = await response.blob();
-        const url = await uploadReviewPhoto(profile.id, blob);
+        const asset = result.assets[0];
+        const response = await fetch(asset.uri);
+        const arrayBuffer = await response.arrayBuffer();
+        const url = await uploadReviewPhoto(profile.id, arrayBuffer, 'image/jpeg');
         setPhotos(prev => [...prev, url]);
-      } catch {
-        Alert.alert('Upload failed', 'Could not upload photo.');
+      } catch (e: any) {
+        toast.error(e?.message ?? 'Could not upload photo.', 'Upload failed');
       } finally {
         setUploading(false);
       }
     }
   };
 
-  const goToRate = () => {
-    if (!restaurant) return;
+  const goToRate = (selected?: AlgoliaRestaurant) => {
+    const r = selected ?? restaurant;
+    if (!r) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setStep('rate');
   };
@@ -179,14 +314,17 @@ export default function AddReviewScreen() {
   const progressSteps = ['restaurant', 'rate', 'details'];
   const stepIdx = progressSteps.indexOf(step);
 
+  const safeTop = Math.max(insets.top, 44);
+
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <View style={styles.container}>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={safeTop}
       >
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: safeTop + spacing[2] }]}>
           <TouchableOpacity onPress={() => step === 'restaurant' ? router.back() : setStep(step === 'details' ? 'rate' : 'restaurant')}>
             <Ionicons name={step === 'restaurant' ? 'close' : 'arrow-back'} size={24} color={colors.textPrimary} />
           </TouchableOpacity>
@@ -221,72 +359,157 @@ export default function AddReviewScreen() {
         {/* ── Step 1: Restaurant ───────────────── */}
         {step === 'restaurant' && (
           <View style={{ flex: 1 }}>
-            <View style={styles.searchContainer}>
-              <Ionicons name="search" size={18} color={colors.textTertiary} />
-              <TextInput
-                style={styles.searchInput}
-                placeholder={halalOnly ? "Search halal restaurants..." : "Search restaurants..."}
-                placeholderTextColor={colors.textTertiary}
-                value={searchQuery}
-                onChangeText={handleSearch}
-                autoFocus
-                returnKeyType="search"
-              />
-              {isSearching && <ActivityIndicator size="small" color={colors.primary} />}
-              {searchQuery.length > 0 && !isSearching && (
-                <TouchableOpacity onPress={() => { setSearchQuery(''); setSearchResults([]); }}>
-                  <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
-                </TouchableOpacity>
-              )}
+            {/* Places / People tab switcher */}
+            <View style={styles.addTabRow}>
+              <TouchableOpacity
+                style={[styles.addTab, addTab === 'places' && styles.addTabActive]}
+                onPress={() => { setAddTab('places'); setPeopleQuery(''); setDebouncedPeopleQuery(''); }}
+              >
+                <Ionicons name="restaurant" size={14} color={addTab === 'places' ? colors.primary : colors.textTertiary} style={{ marginRight: 4 }} />
+                <RText variant="labelMedium" color={addTab === 'places' ? colors.primary : colors.textTertiary}
+                  style={{ fontWeight: addTab === 'places' ? '700' : '500' }}>Places</RText>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.addTab, addTab === 'people' && styles.addTabActive]}
+                onPress={() => { setAddTab('people'); setSearchQuery(''); setSearchResults([]); }}
+              >
+                <Ionicons name="people" size={14} color={addTab === 'people' ? colors.primary : colors.textTertiary} style={{ marginRight: 4 }} />
+                <RText variant="labelMedium" color={addTab === 'people' ? colors.primary : colors.textTertiary}
+                  style={{ fontWeight: addTab === 'people' ? '700' : '500' }}>People</RText>
+              </TouchableOpacity>
             </View>
 
-            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-              {searchResults.length > 0 ? (
-                <View style={styles.resultsList}>
-                  {searchResults.map(r => (
-                    <TouchableOpacity
-                      key={r.objectID}
-                      style={styles.resultRow}
-                      onPress={() => { setRestaurant(r); setSearchResults([]); setSearchQuery(''); goToRate(); }}
-                    >
-                      <View style={styles.resultIcon}>
-                        <Ionicons name="restaurant" size={18} color={colors.primary} />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <RText variant="titleSmall">{r.name}</RText>
-                        <View style={styles.resultMeta}>
-                          <Caption>{CATEGORY_LABELS[r.category] ?? r.category}</Caption>
-                          <Caption color={colors.textTertiary}> · {r.area ?? r.city}</Caption>
-                          <Caption color={colors.textTertiary}> · {r.price_range}</Caption>
-                        </View>
-                      </View>
-                      {r.dietary_options?.includes('halal_certified') && (
-                        <View style={styles.halalTag}>
-                          <Caption color={colors.halal} style={{ fontWeight: '700', fontSize: 10 }}>HALAL</Caption>
-                        </View>
-                      )}
+            {/* ── Places search ── */}
+            {addTab === 'places' && (
+              <>
+                <View style={styles.searchContainer}>
+                  <Ionicons name="search" size={18} color={colors.textTertiary} />
+                  <TextInput
+                    style={styles.searchInput}
+                    placeholder={halalOnly ? "Search halal restaurants..." : "Search restaurants..."}
+                    placeholderTextColor={colors.textTertiary}
+                    value={searchQuery}
+                    onChangeText={handleSearch}
+                    autoFocus
+                    returnKeyType="search"
+                  />
+                  {isSearching && <ActivityIndicator size="small" color={colors.primary} />}
+                  {searchQuery.length > 0 && !isSearching && (
+                    <TouchableOpacity onPress={() => { setSearchQuery(''); setSearchResults([]); }}>
+                      <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
                     </TouchableOpacity>
-                  ))}
+                  )}
                 </View>
-              ) : searchQuery.length >= 2 && !isSearching ? (
-                <View style={styles.noResults}>
-                  <Caption color={colors.textTertiary}>No results for "{searchQuery}"</Caption>
-                  <Caption color={colors.textTertiary} style={{ marginTop: spacing[2] }}>
-                    Try a different name or check spelling
-                  </Caption>
+
+                {searchResults.length > 0 ? (
+                  <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                    <View style={styles.resultsList}>
+                      {searchResults.map(r => (
+                        <TouchableOpacity
+                          key={r.objectID}
+                          style={styles.resultRow}
+                          onPress={() => { setRestaurant(r); setSearchResults([]); setSearchQuery(''); goToRate(r); }}
+                        >
+                          <View style={styles.resultIcon}>
+                            <Ionicons name="restaurant" size={18} color={colors.primary} />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <RText variant="titleSmall">{r.name}</RText>
+                            <View style={styles.resultMeta}>
+                              <Caption>{CATEGORY_LABELS[r.category] ?? r.category}</Caption>
+                              <Caption color={colors.textTertiary}> · {r.area ?? r.city}</Caption>
+                              <Caption color={colors.textTertiary}> · {r.price_range}</Caption>
+                            </View>
+                          </View>
+                          {reviewedIds?.has(r.objectID) && (
+                            <Ionicons name="checkmark-circle" size={18} color={colors.success} />
+                          )}
+                          {!reviewedIds?.has(r.objectID) && savedIds?.has(r.objectID) && (
+                            <Ionicons name="bookmark" size={16} color={colors.accent} />
+                          )}
+                          {r.dietary_options?.includes('halal_certified') && (
+                            <View style={styles.halalTag}>
+                              <Caption color={colors.halal} style={{ fontWeight: '700', fontSize: 10 }}>HALAL</Caption>
+                            </View>
+                          )}
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </ScrollView>
+                ) : searchQuery.length >= 2 && !isSearching ? (
+                  <View style={styles.noResults}>
+                    <Caption color={colors.textTertiary}>No results for "{searchQuery}"</Caption>
+                    <Caption color={colors.textTertiary} style={{ marginTop: spacing[2] }}>
+                      Try a different name or check spelling
+                    </Caption>
+                  </View>
+                ) : searchQuery.length === 0 ? (
+                  <View style={styles.searchPrompt}>
+                    <RText style={{ fontSize: 48, lineHeight: 58, textAlign: 'center' }}>🔍</RText>
+                    <RText variant="bodyMedium" color={colors.textSecondary} align="center" style={{ marginTop: spacing[3] }}>
+                      Start typing to search{'\n'}restaurants near you
+                    </RText>
+                    <Caption color={colors.textTertiary} align="center" style={{ marginTop: spacing[2] }}>
+                      {halalOnly ? 'Showing halal certified only' : 'All restaurants'}
+                    </Caption>
+                  </View>
+                ) : null}
+              </>
+            )}
+
+            {/* ── People search ── */}
+            {addTab === 'people' && (
+              <>
+                <View style={styles.searchContainer}>
+                  <Ionicons name="search" size={18} color={colors.textTertiary} />
+                  <TextInput
+                    style={styles.searchInput}
+                    placeholder="Search by name or @username"
+                    placeholderTextColor={colors.textTertiary}
+                    value={peopleQuery}
+                    onChangeText={handlePeopleSearch}
+                    autoFocus
+                    returnKeyType="search"
+                  />
+                  {peopleSearching && <ActivityIndicator size="small" color={colors.primary} />}
+                  {peopleQuery.length > 0 && !peopleSearching && (
+                    <TouchableOpacity onPress={() => { setPeopleQuery(''); setDebouncedPeopleQuery(''); }}>
+                      <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
+                    </TouchableOpacity>
+                  )}
                 </View>
-              ) : searchQuery.length === 0 ? (
-                <View style={styles.searchPrompt}>
-                  <RText style={{ fontSize: 48, textAlign: 'center' }}>🔍</RText>
-                  <RText variant="bodyMedium" color={colors.textSecondary} align="center" style={{ marginTop: spacing[3] }}>
-                    Start typing to search{'\n'}restaurants near you
-                  </RText>
-                  <Caption color={colors.textTertiary} align="center" style={{ marginTop: spacing[2] }}>
-                    {halalOnly ? 'Showing halal certified only' : 'All restaurants'}
-                  </Caption>
-                </View>
-              ) : null}
-            </ScrollView>
+
+                {peopleResults.length > 0 ? (
+                  <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                    {(peopleResults as any[]).map(u => (
+                      <TouchableOpacity
+                        key={u.id}
+                        style={styles.resultRow}
+                        onPress={() => router.push(`/user/${u.username}`)}
+                      >
+                        <Avatar uri={u.avatar_url} name={u.display_name} size="md" />
+                        <View style={{ flex: 1, marginLeft: spacing[3] }}>
+                          <RText variant="titleSmall">{u.display_name}</RText>
+                          <Caption color={colors.textSecondary}>@{u.username} · {u.city} · {u.total_reviews} reviews</Caption>
+                        </View>
+                        <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                ) : debouncedPeopleQuery.length >= 2 && !peopleSearching ? (
+                  <View style={styles.noResults}>
+                    <Caption color={colors.textTertiary}>No one found for "{peopleQuery}"</Caption>
+                  </View>
+                ) : (
+                  <View style={styles.searchPrompt}>
+                    <RText style={{ fontSize: 48, lineHeight: 58, textAlign: 'center' }}>👥</RText>
+                    <RText variant="bodyMedium" color={colors.textSecondary} align="center" style={{ marginTop: spacing[3] }}>
+                      Find food lovers{'\n'}by name or username
+                    </RText>
+                  </View>
+                )}
+              </>
+            )}
           </View>
         )}
 
@@ -307,9 +530,19 @@ export default function AddReviewScreen() {
               </TouchableOpacity>
             </View>
 
+            {/* Already reviewed banner */}
+            {existingReview && (
+              <View style={styles.alreadyReviewedBanner}>
+                <Ionicons name="checkmark-circle" size={16} color={colors.success} />
+                <RText variant="labelMedium" color={colors.success} style={{ marginLeft: 6 }}>
+                  You reviewed this before ({existingReview.rating}★) — submitting will update it
+                </RText>
+              </View>
+            )}
+
             {/* Big rating picker */}
             <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-              <RatingPicker value={rating} onChange={setRating} />
+              <RatingPicker value={rating} onChange={existingReview ? (v) => { setRating(v); } : setRating} />
             </View>
 
             {/* Continue */}
@@ -376,6 +609,8 @@ export default function AddReviewScreen() {
                 numberOfLines={5}
                 maxLength={500}
                 textAlignVertical="top"
+                returnKeyType="done"
+                blurOnSubmit
               />
               <Caption color={colors.textTertiary} align="right">{500 - content.length} chars left</Caption>
             </View>
@@ -433,7 +668,18 @@ export default function AddReviewScreen() {
           </ScrollView>
         )}
       </KeyboardAvoidingView>
-    </SafeAreaView>
+
+      {success && (
+        <ReviewSuccessOverlay
+          data={success}
+          onDismiss={() => {
+            setSuccess(null);
+            reset();
+            router.push('/(tabs)');
+          }}
+        />
+      )}
+    </View>
   );
 }
 
@@ -446,7 +692,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: spacing[4],
-    paddingVertical: spacing[3],
+    paddingBottom: spacing[4],
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
@@ -472,6 +718,21 @@ const styles = StyleSheet.create({
   },
 
   // Step 1: Search
+  addTabRow: {
+    flexDirection: 'row',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  addTab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing[3],
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  addTabActive: { borderBottomColor: colors.primary },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -523,20 +784,42 @@ const styles = StyleSheet.create({
     borderColor: colors.halal,
   },
   noResults: {
+    flex: 1,
     alignItems: 'center',
-    paddingTop: spacing[10],
+    justifyContent: 'center',
     paddingHorizontal: spacing[8],
+    paddingBottom: spacing[12],
   },
   searchPrompt: {
+    flex: 1,
     alignItems: 'center',
-    paddingTop: 60,
+    justifyContent: 'center',
     paddingHorizontal: spacing[8],
+    paddingBottom: spacing[12],
   },
 
   // Step 2: Rating
   ratingStep: {
     flex: 1,
     paddingHorizontal: spacing[4],
+  },
+  alreadyReviewedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EDF7EE',
+    borderRadius: radius.lg,
+    padding: spacing[3],
+    marginTop: spacing[3],
+  },
+  inputFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: spacing[2],
+  },
+  doneBtn: {
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[1],
   },
   restaurantSummary: {
     flexDirection: 'row',

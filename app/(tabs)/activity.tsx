@@ -2,7 +2,7 @@ import React from 'react';
 import {
   View, StyleSheet, TouchableOpacity, FlatList,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -28,6 +28,7 @@ const NOTIFICATION_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
 export default function ActivityScreen() {
   const { profile } = useAuthStore();
   const qc = useQueryClient();
+  const insets = useSafeAreaInsets();
 
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.notifications(profile?.id ?? ''),
@@ -49,13 +50,13 @@ export default function ActivityScreen() {
     }
     const d = notification.data;
     if (d.restaurant_id) router.push(`/restaurant/${d.restaurant_id}`);
-    else if (d.follower_id) router.push(`/user/${String(d.follower_id)}`);
+    else if (notification.actor?.username) router.push(`/user/${notification.actor.username}`);
     else if (d.username) router.push(`/user/${String(d.username)}`);
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
+    <View style={styles.container}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top, 44) + spacing[2] }]}>
         <RText variant="h3">Activity</RText>
         {unreadCount > 0 && (
           <TouchableOpacity onPress={() => markReadMutation.mutate(undefined)}>
@@ -100,14 +101,14 @@ export default function ActivityScreen() {
         )}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <RText style={{ fontSize: 40 }}>🔔</RText>
+            <RText style={{ fontSize: 40, lineHeight: 52 }}>🔔</RText>
             <RText variant="titleLarge" style={{ marginTop: spacing[4] }}>No activity yet</RText>
             <Caption>When friends interact with you, you'll see it here.</Caption>
           </View>
         }
         showsVerticalScrollIndicator={false}
       />
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -118,7 +119,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: spacing[4],
-    paddingVertical: spacing[3],
+    paddingBottom: spacing[3],
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },

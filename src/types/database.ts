@@ -185,6 +185,7 @@ export interface DbUser {
   onboarding_completed: boolean;
   push_token: string | null;
   preferred_language: string;
+  active_theme: string;
   dietary_preferences: DietaryOption[];
   favorite_cuisines: CuisineType[];
   location_lat: number | null;
@@ -393,6 +394,8 @@ export interface DbFoodPassport {
   total_likes_received: number;
   streak_days: number;
   last_activity_date: string | null;
+  streak_week_start: string | null;
+  coins: number;
   created_at: string;
   updated_at: string;
 }

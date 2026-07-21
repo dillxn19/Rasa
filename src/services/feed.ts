@@ -8,9 +8,15 @@ export async function getHomeFeed(userId: string, page = 0, limit = 20): Promise
     p_offset: page * limit,
   });
 
-  if (error) throw error;
+  if (error) {
+    // RPC not deployed yet — fall back to direct query
+    return getFollowsActivityFallback(userId, page, limit);
+  }
 
-  return (data as Record<string, unknown>[]).map(row => ({
+  // Filter out 'visit' events — every review creates both a 'review' + 'visit' event
+  const rows = (data as Record<string, unknown>[]).filter(row => row.event_type !== 'visit');
+
+  const items = rows.map(row => ({
     id: row.event_id as string,
     type: row.event_type as FeedItem['type'],
     created_at: row.created_at as string,
@@ -41,6 +47,67 @@ export async function getHomeFeed(userId: string, page = 0, limit = 20): Promise
     badge: row.badge_name ? { name: row.badge_name as string } : undefined,
     data: (row.data as Record<string, unknown>) ?? {},
   })) as FeedItem[];
+
+  return attachLikedState(items, userId);
+}
+
+async function attachLikedState(items: FeedItem[], userId: string): Promise<FeedItem[]> {
+  const reviewIds = items.flatMap(i => i.review ? [i.review.id] : []);
+  if (!reviewIds.length) return items;
+
+  const { data: likedRows } = await supabase
+    .from('likes')
+    .select('review_id')
+    .eq('user_id', userId)
+    .in('review_id', reviewIds);
+
+  const likedSet = new Set((likedRows ?? []).map(l => l.review_id as string));
+  return items.map(item =>
+    item.review
+      ? { ...item, review: { ...item.review, is_liked: likedSet.has(item.review.id) } }
+      : item,
+  );
+}
+
+async function getFollowsActivityFallback(userId: string, page = 0, limit = 20): Promise<FeedItem[]> {
+  const { data: followsData } = await supabase
+    .from('follows')
+    .select('following_id')
+    .eq('follower_id', userId);
+
+  if (!followsData?.length) return [];
+
+  const followingIds = followsData.map(f => f.following_id);
+
+  const { data } = await supabase
+    .from('activity_events')
+    .select(`
+      id, type, created_at, data,
+      user:users!user_id(id, username, display_name, avatar_url),
+      restaurant:restaurants!restaurant_id(id, name, slug, cover_photo_url, category, overall_rating),
+      review:reviews!review_id(id, rating, content, photos, like_count, comment_count),
+      list:lists!list_id(id, title, cover_photo_url, restaurant_count),
+      badge:badges!badge_id(id, name, icon_emoji, category)
+    `)
+    .eq('is_public', true)
+    .in('user_id', followingIds)
+    .neq('type', 'visit')
+    .order('created_at', { ascending: false })
+    .range(page * limit, (page + 1) * limit - 1);
+
+  const items = (data?.map(row => ({
+    id: row.id,
+    type: row.type,
+    created_at: row.created_at,
+    actor: row.user,
+    restaurant: row.restaurant,
+    review: row.review,
+    list: row.list,
+    badge: row.badge,
+    data: row.data ?? {},
+  })) ?? []) as unknown as FeedItem[];
+
+  return attachLikedState(items, userId);
 }
 
 export async function getGlobalFeed(page = 0, limit = 20): Promise<FeedItem[]> {

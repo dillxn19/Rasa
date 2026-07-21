@@ -5,6 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { colors, spacing, radius, shadows } from '@/theme';
+import { useTheme } from '@/theme/ThemeProvider';
 import { RText, Caption } from '@/components/ui/Text';
 import { StarRating } from '@/components/ui/StarRating';
 import type { RecommendationResult } from '@/services/recommendations';
@@ -40,7 +41,7 @@ export function RecommendationCard({ rec, onDismiss }: RecommendationCardProps) 
         />
       ) : (
         <View style={[styles.photo, styles.photoFallback]}>
-          <RText style={{ fontSize: 48 }}>🍜</RText>
+          <RText style={{ fontSize: 48, lineHeight: 58 }}>🍜</RText>
         </View>
       )}
 
@@ -101,6 +102,7 @@ interface ForYouSectionProps {
 }
 
 export function ForYouSection({ recs, onDismiss }: ForYouSectionProps) {
+  const theme = useTheme();
   if (recs.length === 0) return null;
 
   return (
@@ -111,7 +113,7 @@ export function ForYouSection({ recs, onDismiss }: ForYouSectionProps) {
           <Caption>Based on your taste profile</Caption>
         </View>
         <TouchableOpacity onPress={() => router.push('/(tabs)/explore')}>
-          <Caption color={colors.primary}>See all</Caption>
+          <Caption color={theme.primary}>See all</Caption>
         </TouchableOpacity>
       </View>
       <ScrollView

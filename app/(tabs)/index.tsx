@@ -1,13 +1,15 @@
 import React, { useCallback, useRef } from 'react';
 import {
-  View, StyleSheet, RefreshControl, TouchableOpacity, ScrollView, Animated,
+  View, StyleSheet, RefreshControl, TouchableOpacity, ScrollView, Animated, Switch,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { colors, spacing, radius, shadows } from '@/theme';
+import { useTheme } from '@/theme/ThemeProvider';
+import { saveUserHalal } from '@/stores/settingsStore';
 import { RText, Caption } from '@/components/ui/Text';
 import { Avatar } from '@/components/ui/Avatar';
 import { FeedCard } from '@/components/feed/FeedCard';
@@ -20,13 +22,16 @@ import { getRecommendations, getTrendingNearby, dismissRecommendation } from '@/
 import { queryKeys } from '@/lib/queryClient';
 import type { FeedItem } from '@/types';
 
-const HEADER_HEIGHT = 56;
+const HEADER_CONTENT_HEIGHT = 56;
 
 export default function HomeScreen() {
   const { profile } = useAuthStore();
   const { halalOnly, toggleHalalOnly } = useSettingsStore();
+  const theme = useTheme();
   const qc = useQueryClient();
   const scrollY = useRef(new Animated.Value(0)).current;
+  const insets = useSafeAreaInsets();
+  const safeTop = Math.max(insets.top, 44);
 
   // Recommendations
   const { data: recsData, isLoading: recsLoading } = useQuery({
@@ -74,6 +79,7 @@ export default function HomeScreen() {
   const handleHalalToggle = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     toggleHalalOnly();
+    if (profile) saveUserHalal(profile.id, !halalOnly);
   };
 
   const handleRefresh = useCallback(() => {
@@ -82,26 +88,26 @@ export default function HomeScreen() {
   }, [refetch, qc, profile?.id]);
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <View style={styles.container}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: safeTop }]}>
         <RText style={styles.logo}>
           rasa
-          <RText style={[styles.logo, { color: colors.primary }]}>.</RText>
+          <RText style={[styles.logo, { color: theme.primary }]}>.</RText>
         </RText>
 
         <View style={styles.headerRight}>
           {/* Halal toggle */}
-          <TouchableOpacity
-            style={[styles.halalBtn, halalOnly && styles.halalBtnActive]}
-            onPress={handleHalalToggle}
-            activeOpacity={0.8}
-          >
-            <RText style={{ fontSize: 13 }}>🟢</RText>
-            <RText style={[styles.halalLabel, halalOnly && styles.halalLabelActive]}>
-              Halal
-            </RText>
-          </TouchableOpacity>
+          <View style={styles.halalToggleRow}>
+            <RText style={[styles.halalLabel, halalOnly && styles.halalLabelActive]}>Halal</RText>
+            <Switch
+              value={halalOnly}
+              onValueChange={handleHalalToggle}
+              trackColor={{ false: colors.gray200, true: colors.halal }}
+              thumbColor={colors.white}
+              ios_backgroundColor={colors.gray200}
+            />
+          </View>
 
           {/* Search */}
           <TouchableOpacity style={styles.headerBtn} onPress={() => router.push('/search')}>
@@ -184,7 +190,7 @@ export default function HomeScreen() {
             onPress={() => !isFetchingNextPage && fetchNextPage()}
             disabled={isFetchingNextPage}
           >
-            <Caption color={colors.primary}>
+            <Caption color={theme.primary}>
               {isFetchingNextPage ? 'Loading...' : 'Load more'}
             </Caption>
           </TouchableOpacity>
@@ -192,14 +198,14 @@ export default function HomeScreen() {
 
         <View style={{ height: spacing[10] }} />
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 function EmptyFeed() {
   return (
     <View style={styles.empty}>
-      <RText style={{ fontSize: 48 }}>🍜</RText>
+      <RText style={{ fontSize: 48, lineHeight: 58 }}>🍜</RText>
       <RText variant="h3" style={{ marginTop: spacing[4] }}>Your feed is quiet</RText>
       <RText variant="bodyMedium" color={colors.textSecondary} align="center" style={{ marginTop: spacing[2], maxWidth: 280 }}>
         Follow food lovers you know to see where they're eating.
@@ -217,13 +223,14 @@ function EmptyFeed() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
 
-  // Header
+  // Header — height set dynamically via paddingTop inline
   header: {
-    height: HEADER_HEIGHT,
+    minHeight: HEADER_CONTENT_HEIGHT,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: spacing[4],
+    paddingBottom: spacing[3],
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
     backgroundColor: colors.background,
@@ -244,20 +251,10 @@ const styles = StyleSheet.create({
   },
 
   // Halal toggle
-  halalBtn: {
+  halalToggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: spacing[3],
-    paddingVertical: spacing[1],
-    borderRadius: radius.full,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  halalBtnActive: {
-    borderColor: colors.halal,
-    backgroundColor: colors.halalBg,
+    gap: spacing[2],
   },
   halalLabel: {
     fontSize: 13,

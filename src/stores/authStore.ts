@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Session, User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
+import { loadUserHalal, useSettingsStore } from './settingsStore';
 import type { User } from '@/types';
 
 interface AuthState {
@@ -57,6 +58,7 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
           .single();
 
         set({ profile: profile as User | null });
+        if (profile) await loadUserHalal((profile as User).id);
       }
 
       // Listen for auth changes
@@ -70,8 +72,10 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
             .eq('auth_id', newSession.user.id)
             .single();
           set({ profile: profile as User | null });
+          if (profile) await loadUserHalal((profile as User).id);
         } else if (event === 'SIGNED_OUT') {
           set({ profile: null });
+          useSettingsStore.getState().setHalalOnly(false);
         }
       });
     } catch (error) {

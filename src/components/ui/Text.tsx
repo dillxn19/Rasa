@@ -1,6 +1,7 @@
 import React from 'react';
 import { Text, TextStyle, StyleSheet } from 'react-native';
 import { colors, typography, type TypographyVariant } from '@/theme';
+import { useTheme } from '@/theme/ThemeProvider';
 
 interface RTextProps {
   variant?: TypographyVariant;
@@ -10,7 +11,14 @@ interface RTextProps {
   children: React.ReactNode;
   style?: TextStyle | TextStyle[];
   selectable?: boolean;
+  onPress?: () => void;
 }
+
+// Heading/title variants that a "signature" theme restyles with its display
+// font. Body/caption/label variants stay in the system font for readability.
+const DISPLAY_VARIANTS = new Set<TypographyVariant>([
+  'displayLarge', 'displayMedium', 'h1', 'h2', 'h3', 'h4', 'titleLarge',
+]);
 
 export function RText({
   variant = 'bodyMedium',
@@ -20,17 +28,26 @@ export function RText({
   children,
   style,
   selectable,
+  onPress,
 }: RTextProps) {
+  const theme = useTheme();
+  const themedFont =
+    theme.displayFontFamily && DISPLAY_VARIANTS.has(variant)
+      ? { fontFamily: theme.displayFontFamily }
+      : undefined;
+
   return (
     <Text
       style={[
         typography[variant] as TextStyle,
         { color: color ?? colors.textPrimary },
         align ? { textAlign: align } : undefined,
+        themedFont,
         style,
       ]}
       numberOfLines={numberOfLines}
       selectable={selectable}
+      onPress={onPress}
     >
       {children}
     </Text>

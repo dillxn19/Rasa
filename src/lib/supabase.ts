@@ -69,22 +69,23 @@ export const STORAGE_BUCKETS = {
   reviewPhotos: 'review-photos',
 } as const;
 
-export async function uploadAvatar(userId: string, blob: Blob): Promise<string> {
+export async function uploadAvatar(userId: string, data: Blob | ArrayBuffer): Promise<string> {
   const filename = `${userId}/avatar_${Date.now()}.jpg`;
-  const { data, error } = await supabase.storage
+  const { data: result, error } = await supabase.storage
     .from(STORAGE_BUCKETS.avatars)
-    .upload(filename, blob, { contentType: 'image/jpeg', upsert: true });
+    .upload(filename, data, { contentType: 'image/jpeg', upsert: true });
   if (error) throw error;
-  return supabase.storage.from(STORAGE_BUCKETS.avatars).getPublicUrl(data.path).data.publicUrl;
+  return supabase.storage.from(STORAGE_BUCKETS.avatars).getPublicUrl(result.path).data.publicUrl;
 }
 
-export async function uploadReviewPhoto(userId: string, blob: Blob): Promise<string> {
-  const filename = `${userId}/${Date.now()}.jpg`;
-  const { data, error } = await supabase.storage
+export async function uploadReviewPhoto(userId: string, data: Blob | ArrayBuffer, contentType = 'image/jpeg'): Promise<string> {
+  const ext = contentType === 'image/png' ? 'png' : 'jpg';
+  const filename = `${userId}/${Date.now()}.${ext}`;
+  const { data: result, error } = await supabase.storage
     .from(STORAGE_BUCKETS.reviewPhotos)
-    .upload(filename, blob, { contentType: 'image/jpeg' });
+    .upload(filename, data, { contentType, upsert: false });
   if (error) throw error;
-  return supabase.storage.from(STORAGE_BUCKETS.reviewPhotos).getPublicUrl(data.path).data.publicUrl;
+  return supabase.storage.from(STORAGE_BUCKETS.reviewPhotos).getPublicUrl(result.path).data.publicUrl;
 }
 
 export async function uploadRestaurantPhoto(restaurantId: string, blob: Blob): Promise<string> {

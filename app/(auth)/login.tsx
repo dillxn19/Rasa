@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
-  Alert,
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, radius } from '@/theme';
+import { toast } from '@/stores/toastStore';
 import { Button } from '@/components/ui/Button';
 import { RText, H2, Body, Caption } from '@/components/ui/Text';
 
@@ -25,7 +25,7 @@ export default function LoginScreen() {
 
   const handleLogin = async () => {
     if (!email.trim() || !password) {
-      Alert.alert('Error', 'Please enter your email and password.');
+      toast.error('Please enter your email and password.');
       return;
     }
 
@@ -37,35 +37,27 @@ export default function LoginScreen() {
       });
 
       if (error) throw error;
-      // Auth state change will redirect automatically
+      router.replace('/(tabs)');
     } catch (error: unknown) {
-      Alert.alert('Login failed', error instanceof Error ? error.message : 'Please try again.');
+      toast.error(error instanceof Error ? error.message : 'Please try again.', 'Login failed');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleForgotPassword = () => {
-    Alert.prompt(
-      'Reset Password',
-      'Enter your email address and we\'ll send you a reset link.',
-      async (inputEmail) => {
-        if (!inputEmail?.trim()) return;
-        const { error } = await supabase.auth.resetPasswordForEmail(inputEmail.trim());
-        if (error) {
-          Alert.alert('Error', error.message);
-        } else {
-          Alert.alert('Check your email', 'A password reset link has been sent.');
-        }
-      },
-      'plain-text',
-      email,
-    );
+  const handleForgotPassword = async () => {
+    if (!email.trim()) {
+      toast.info('Enter your email above, then tap Forgot Password again.');
+      return;
+    }
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
+    if (error) toast.error(error.message);
+    else toast.success('A password reset link has been sent.', 'Check your email');
   };
 
   const handleGoogleLogin = async () => {
     const { error } = await supabase.auth.signInWithOAuth({ provider: 'google' });
-    if (error) Alert.alert('Error', error.message);
+    if (error) toast.error(error.message);
   };
 
   return (

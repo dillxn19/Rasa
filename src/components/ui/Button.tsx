@@ -14,6 +14,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { colors, spacing, radius, typography } from '@/theme';
+import { useTheme } from '@/theme/ThemeProvider';
 import { RText } from './Text';
 
 type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger' | 'success';
@@ -50,6 +51,7 @@ export function Button({
   textStyle,
   haptic = true,
 }: ButtonProps) {
+  const theme = useTheme();
   const scale = useSharedValue(1);
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -75,6 +77,8 @@ export function Button({
     styles.base,
     styles[`size_${size}`],
     styles[`variant_${variant}`],
+    // Themed brand colors override the static variant background.
+    variant === 'primary' && { backgroundColor: theme.primary },
     fullWidth && styles.fullWidth,
     (isDisabled || isLoading) && styles.disabled,
     style,
@@ -84,6 +88,7 @@ export function Button({
     styles.label,
     styles[`labelSize_${size}`],
     styles[`labelVariant_${variant}`],
+    variant === 'ghost' && { color: theme.primary },
     (isDisabled || isLoading) && styles.labelDisabled,
     textStyle,
   ];

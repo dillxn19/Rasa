@@ -111,18 +111,24 @@ async function indexRestaurants() {
       typoTolerance: true,
       minWordSizefor1Typo: 3,
       minWordSizefor2Typos: 7,
-      synonyms: [
-        { objectID: 'mee-noodle', type: 'synonym', synonyms: ['mee', 'mi', 'noodle', 'noodles'] },
-        { objectID: 'nasi-rice', type: 'synonym', synonyms: ['nasi', 'rice'] },
-        { objectID: 'ayam-chicken', type: 'synonym', synonyms: ['ayam', 'chicken'] },
-        { objectID: 'ikan-fish', type: 'synonym', synonyms: ['ikan', 'fish'] },
-        { objectID: 'kopi-coffee', type: 'synonym', synonyms: ['kopi', 'coffee', 'cafe', 'kopitiam'] },
-        { objectID: 'roti-bread', type: 'synonym', synonyms: ['roti', 'bread', 'toast'] },
-        { objectID: 'kl-kuala', type: 'oneWaySynonym', input: 'KL', synonyms: ['Kuala Lumpur'] },
-        { objectID: 'pj-petaling', type: 'oneWaySynonym', input: 'PJ', synonyms: ['Petaling Jaya'] },
-        { objectID: 'jb-johor', type: 'oneWaySynonym', input: 'JB', synonyms: ['Johor Bahru'] },
-      ],
     },
+  });
+
+  // Configure synonyms (separate API call in Algolia v5)
+  await algolia.saveSynonyms({
+    indexName: RESTAURANTS_INDEX,
+    synonymHit: [
+      { objectID: 'mee-noodle', type: 'synonym', synonyms: ['mee', 'mi', 'noodle', 'noodles'] },
+      { objectID: 'nasi-rice', type: 'synonym', synonyms: ['nasi', 'rice'] },
+      { objectID: 'ayam-chicken', type: 'synonym', synonyms: ['ayam', 'chicken'] },
+      { objectID: 'ikan-fish', type: 'synonym', synonyms: ['ikan', 'fish'] },
+      { objectID: 'kopi-coffee', type: 'synonym', synonyms: ['kopi', 'coffee', 'cafe', 'kopitiam'] },
+      { objectID: 'roti-bread', type: 'synonym', synonyms: ['roti', 'bread', 'toast'] },
+      { objectID: 'kl-kuala', type: 'oneWaySynonym', input: 'KL', synonyms: ['Kuala Lumpur'] },
+      { objectID: 'pj-petaling', type: 'oneWaySynonym', input: 'PJ', synonyms: ['Petaling Jaya'] },
+      { objectID: 'jb-johor', type: 'oneWaySynonym', input: 'JB', synonyms: ['Johor Bahru'] },
+    ],
+    replaceExistingSynonyms: true,
   });
 
   console.log(`\n🎉 Done! Indexed ${totalIndexed} restaurants to Algolia.`);

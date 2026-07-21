@@ -4,11 +4,14 @@ import {
   TouchableOpacity,
   StyleSheet,
   Dimensions,
+  Pressable,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import * as Haptics from 'expo-haptics';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { colors, spacing, radius, shadows } from '@/theme';
 import { RText, Caption } from '@/components/ui/Text';
 import { StarRating } from '@/components/ui/StarRating';
@@ -18,6 +21,17 @@ import { CATEGORY_LABELS, DIETARY_LABELS, PRICE_LABELS } from '@/types';
 import { getOpenStatus } from '@/lib/openingHours';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+// Subtle press-in scale used across cards for a tactile, "cool" feel.
+function usePressScale(target = 0.97) {
+  const scale = useSharedValue(1);
+  const style = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+  const onPressIn = () => { scale.value = withSpring(target, { damping: 18, stiffness: 320 }); };
+  const onPressOut = () => { scale.value = withSpring(1, { damping: 16, stiffness: 300 }); };
+  return { style, onPressIn, onPressOut };
+}
 
 // ─── Standard card (for grids, lists) ────────────────────────
 
@@ -36,7 +50,9 @@ export function RestaurantCard({
   friendReviews = [],
   style,
 }: RestaurantCardProps) {
+  const press = usePressScale();
   const handlePress = () => {
+    Haptics.selectionAsync().catch(() => {});
     if (onPress) onPress();
     else router.push(`/restaurant/${restaurant.slug ?? restaurant.id}`);
   };
@@ -46,7 +62,12 @@ export function RestaurantCard({
   const isMuslimFriendly = !isHalal && restaurant.dietary_options.includes('muslim_friendly');
 
   return (
-    <TouchableOpacity style={[styles.card, style]} onPress={handlePress} activeOpacity={0.92}>
+    <AnimatedPressable
+      style={[styles.card, style, press.style]}
+      onPress={handlePress}
+      onPressIn={press.onPressIn}
+      onPressOut={press.onPressOut}
+    >
       {/* Photo */}
       <View style={styles.photoContainer}>
         {restaurant.cover_photo_url ? (
@@ -117,7 +138,7 @@ export function RestaurantCard({
           </View>
         )}
       </View>
-    </TouchableOpacity>
+    </AnimatedPressable>
   );
 }
 

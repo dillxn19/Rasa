@@ -12,17 +12,19 @@ import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { formatDistanceToNow } from 'date-fns';
 import { colors, spacing, radius, shadows, gradients } from '@/theme';
+import { useTheme } from '@/theme/ThemeProvider';
 import { RText, Caption } from '@/components/ui/Text';
 import { Avatar } from '@/components/ui/Avatar';
-import { StarRating } from '@/components/ui/StarRating';
 import type { FeedItem } from '@/types';
 import { likeReview, unlikeReview, saveRestaurant, unsaveRestaurant } from '@/services/restaurants';
 import { shareViaWhatsApp } from '@/lib/share';
 import { useAuthStore } from '@/stores/authStore';
+import { useReviewedRestaurantIds } from '@/hooks/useReviewedRestaurants';
+import { toast } from '@/stores/toastStore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH;
-const PHOTO_HEIGHT = 320;
+const PHOTO_HEIGHT = 220;
 
 interface FeedCardProps {
   item: FeedItem;
@@ -31,12 +33,14 @@ interface FeedCardProps {
 
 export function FeedCard({ item, onLike }: FeedCardProps) {
   const { profile } = useAuthStore();
-  const [isLiked, setIsLiked] = useState(false);
+  const reviewedIds = useReviewedRestaurantIds();
+  const hasVisited = item.restaurant ? reviewedIds.has(item.restaurant.id) : false;
+  const [isLiked, setIsLiked] = useState(item.review?.is_liked ?? false);
   const [likeCount, setLikeCount] = useState(item.review?.like_count ?? 0);
   const [isSaved, setIsSaved] = useState(false);
 
   const handleLike = async () => {
-    if (!profile || !item.review) return;
+    if (!profile || !item.review || item.actor.id === profile.id) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
     const newLiked = !isLiked;
@@ -65,6 +69,10 @@ export function FeedCard({ item, onLike }: FeedCardProps) {
 
   const handleSave = async () => {
     if (!profile || !item.restaurant) return;
+    if (hasVisited) {
+      toast.info("You've already reviewed this place — it's in your completed list.");
+      return;
+    }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const newSaved = !isSaved;
     setIsSaved(newSaved);
@@ -85,6 +93,11 @@ export function FeedCard({ item, onLike }: FeedCardProps) {
     router.push(`/user/${item.actor.username}`);
   };
 
+  const navigateToComments = () => {
+    if (item.review?.id) router.push(`/review/${item.review.id}`);
+    else if (item.restaurant) router.push(`/restaurant/${item.restaurant.id}`);
+  };
+
   const timeAgo = formatDistanceToNow(new Date(item.created_at), { addSuffix: true });
 
   if (item.type === 'review' || item.type === 'visit') {
@@ -93,10 +106,12 @@ export function FeedCard({ item, onLike }: FeedCardProps) {
       isLiked={isLiked}
       likeCount={likeCount}
       isSaved={isSaved}
+      hasVisited={hasVisited}
       onLike={handleLike}
       onShare={handleShare}
       onSave={handleSave}
       onNavigateRestaurant={navigateToRestaurant}
+      onNavigateComments={navigateToComments}
       onNavigateUser={navigateToUser}
       timeAgo={timeAgo}
     />;
@@ -114,19 +129,22 @@ export function FeedCard({ item, onLike }: FeedCardProps) {
 }
 
 function ReviewFeedCard({
-  item, isLiked, likeCount, isSaved, onLike, onShare, onSave, onNavigateRestaurant, onNavigateUser, timeAgo,
+  item, isLiked, likeCount, isSaved, hasVisited, onLike, onShare, onSave, onNavigateRestaurant, onNavigateComments, onNavigateUser, timeAgo,
 }: {
   item: FeedItem;
   isLiked: boolean;
   likeCount: number;
   isSaved: boolean;
+  hasVisited: boolean;
   onLike: () => void;
   onShare: () => void;
   onSave: () => void;
   onNavigateRestaurant: () => void;
+  onNavigateComments: () => void;
   onNavigateUser: () => void;
   timeAgo: string;
 }) {
+  const theme = useTheme();
   const photos = item.review?.photos ?? [];
   const coverPhoto = photos[0] ?? item.restaurant?.cover_photo_url;
 
@@ -173,17 +191,16 @@ function ReviewFeedCard({
                   {item.restaurant?.name}
                 </RText>
                 <View style={styles.ratingRow}>
-                  {item.review?.rating && (
-                    <StarRating
-                      value={item.review.rating}
-                      size={14}
-                      readonly
-                      compact
-                      color={colors.starFilled}
-                    />
-                  )}
-                  <Caption color={colors.whiteTransparent80} style={{ marginLeft: spacing[2] }}>
-                    {item.restaurant?.category?.replace('_', ' ')}
+                  {item.review?.rating ? (
+                    <View style={styles.ratingBadge}>
+                      <RText style={{ fontSize: 13, lineHeight: 17 }}>⭐</RText>
+                      <RText style={{ fontSize: 15, fontWeight: '800', color: colors.white, marginLeft: 4 }}>
+                        {item.review.rating % 1 === 0 ? item.review.rating : item.review.rating.toFixed(1)}
+                      </RText>
+                    </View>
+                  ) : null}
+                  <Caption color={colors.whiteTransparent80}>
+                    {item.restaurant?.category?.replace(/_/g, ' ')}
                   </Caption>
                 </View>
               </View>
@@ -224,16 +241,16 @@ function ReviewFeedCard({
           <Ionicons
             name={isLiked ? 'heart' : 'heart-outline'}
             size={22}
-            color={isLiked ? colors.liked : colors.textSecondary}
+            color={isLiked ? theme.primary : colors.textSecondary}
           />
           {likeCount > 0 && (
-            <RText variant="labelMedium" color={isLiked ? colors.liked : colors.textSecondary} style={{ marginLeft: 5 }}>
+            <RText variant="labelMedium" color={isLiked ? theme.primary : colors.textSecondary} style={{ marginLeft: 5 }}>
               {likeCount}
             </RText>
           )}
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionBtn} activeOpacity={0.7}>
+        <TouchableOpacity style={styles.actionBtn} activeOpacity={0.7} onPress={onNavigateComments}>
           <Ionicons name="chatbubble-outline" size={20} color={colors.textSecondary} />
           {(item.review?.comment_count ?? 0) > 0 && (
             <RText variant="labelMedium" color={colors.textSecondary} style={{ marginLeft: 5 }}>
@@ -245,16 +262,25 @@ function ReviewFeedCard({
         <View style={{ flex: 1 }} />
 
         <TouchableOpacity style={styles.actionBtn} onPress={onShare} activeOpacity={0.7}>
-          <RText style={{ fontSize: 16 }}>💬</RText>
+          <Ionicons name="share-social-outline" size={20} color={colors.textSecondary} />
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.actionBtn} onPress={onSave} activeOpacity={0.7}>
-          <Ionicons
-            name={isSaved ? 'bookmark' : 'bookmark-outline'}
-            size={20}
-            color={isSaved ? colors.primary : colors.textSecondary}
-          />
-        </TouchableOpacity>
+        {hasVisited ? (
+          <View style={[styles.actionBtn, styles.visitedChip]}>
+            <Ionicons name="checkmark-circle" size={16} color={colors.success} />
+            <RText variant="labelSmall" color={colors.success} style={{ marginLeft: 4, fontWeight: '700' }}>
+              Been
+            </RText>
+          </View>
+        ) : (
+          <TouchableOpacity style={styles.actionBtn} onPress={onSave} activeOpacity={0.7}>
+            <Ionicons
+              name={isSaved ? 'bookmark' : 'bookmark-outline'}
+              size={20}
+              color={isSaved ? theme.primary : colors.textSecondary}
+            />
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Separator */}
@@ -322,7 +348,7 @@ function BadgeFeedCard({ item, onNavigateUser, timeAgo }: {
       </TouchableOpacity>
 
       <View style={styles.badgeDisplay}>
-        <RText style={{ fontSize: 40 }}>{(item.badge as { icon_emoji?: string } | undefined)?.icon_emoji ?? '🏅'}</RText>
+        <RText style={{ fontSize: 40, lineHeight: 52 }}>{(item.badge as { icon_emoji?: string } | undefined)?.icon_emoji ?? '🏅'}</RText>
         <RText variant="titleLarge" style={{ marginTop: spacing[2] }}>{item.badge?.name}</RText>
       </View>
       <View style={styles.separator} />
@@ -384,6 +410,15 @@ const styles = StyleSheet.create({
   ratingRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing[2],
+  },
+  ratingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing[2],
+    paddingVertical: 3,
   },
   photoPlaceholder: {
     alignItems: 'center',
@@ -416,6 +451,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: spacing[2],
     borderRadius: radius.lg,
+  },
+  visitedChip: {
+    backgroundColor: colors.successLight,
+    paddingHorizontal: spacing[2],
   },
   separator: {
     height: 8,

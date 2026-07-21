@@ -62,7 +62,7 @@ export async function getUserById(id: string): Promise<User> {
   return data as User;
 }
 
-export async function getUserFollowers(userId: string, page = 0): Promise<User[]> {
+export async function getUserFollowers(userId: string, page = 0, currentUserId?: string): Promise<User[]> {
   const { data, error } = await supabase
     .from('follows')
     .select('follower:users!follower_id(*)')
@@ -71,7 +71,17 @@ export async function getUserFollowers(userId: string, page = 0): Promise<User[]
     .range(page * 30, (page + 1) * 30 - 1);
 
   if (error) throw error;
-  return (data?.map(d => d.follower) ?? []) as User[];
+  const followers = (data?.map(d => d.follower) ?? []) as User[];
+  if (!currentUserId || followers.length === 0) return followers;
+
+  const { data: followingData } = await supabase
+    .from('follows')
+    .select('following_id')
+    .eq('follower_id', currentUserId)
+    .in('following_id', followers.map(f => f.id));
+
+  const followingSet = new Set((followingData ?? []).map(f => f.following_id));
+  return followers.map(f => ({ ...f, is_following: followingSet.has(f.id) }));
 }
 
 export async function getUserFollowing(userId: string, page = 0): Promise<User[]> {
@@ -83,7 +93,7 @@ export async function getUserFollowing(userId: string, page = 0): Promise<User[]
     .range(page * 30, (page + 1) * 30 - 1);
 
   if (error) throw error;
-  return (data?.map(d => d.following) ?? []) as User[];
+  return (data?.map(d => ({ ...(d.following as User), is_following: true })) ?? []) as User[];
 }
 
 export async function followUser(followerId: string, followingId: string): Promise<void> {
@@ -220,6 +230,105 @@ export async function getSuggestedUsers(userId: string, limit = 10): Promise<Use
   return Array.from(uniqueUsers.values());
 }
 
+export async function getDiscoverUsers(currentUserId: string, limit = 40): Promise<User[]> {
+  const [{ data: users }, { data: followingData }] = await Promise.all([
+    supabase
+      .from('users')
+      .select('id, username, display_name, avatar_url, city, follower_count, total_reviews, taste_profile')
+      .eq('is_active', true)
+      .neq('id', currentUserId)
+      .order('total_reviews', { ascending: false })
+      .limit(limit),
+    supabase
+      .from('follows')
+      .select('following_id')
+      .eq('follower_id', currentUserId),
+  ]);
+
+  const followingIds = new Set((followingData ?? []).map(f => f.following_id));
+  return ((users ?? []) as User[]).filter(u => !followingIds.has(u.id));
+}
+
+export interface StreakResult {
+  /** Current streak length in weeks. */
+  weeks: number;
+  /** True when this review opened a brand-new weekly slot (weekly coins awarded). */
+  newWeek: boolean;
+  /** True when this review hit a 5-week milestone (bonus coins awarded). */
+  milestone: boolean;
+}
+
+export async function updateReviewStreak(userId: string): Promise<StreakResult> {
+  const { data: passport } = await supabase
+    .from('food_passports')
+    .select('streak_days, last_activity_date, streak_week_start')
+    .eq('user_id', userId)
+    .single();
+
+  if (!passport) return { weeks: 0, newWeek: false, milestone: false };
+
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
+  const lastActivityStr = passport.last_activity_date as string | null;
+
+  if (lastActivityStr === todayStr) {
+    // already reviewed today — no change
+    return { weeks: passport.streak_days ?? 1, newWeek: false, milestone: false };
+  }
+
+  // No prior activity — start streak at week 1
+  if (!lastActivityStr) {
+    await supabase
+      .from('food_passports')
+      .update({ streak_days: 1, last_activity_date: todayStr, streak_week_start: todayStr, updated_at: new Date().toISOString() })
+      .eq('user_id', userId);
+    return { weeks: 1, newWeek: true, milestone: false };
+  }
+
+  const lastActivity = new Date(lastActivityStr);
+  const daysSinceLast = Math.floor((today.getTime() - lastActivity.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (daysSinceLast >= 7) {
+    // Streak broken — reset to week 1
+    await supabase
+      .from('food_passports')
+      .update({ streak_days: 1, last_activity_date: todayStr, streak_week_start: todayStr, updated_at: new Date().toISOString() })
+      .eq('user_id', userId);
+    return { weeks: 1, newWeek: true, milestone: false };
+  }
+
+  // Within 7 days — check if we've already credited this week's slot
+  const weekStartStr = (passport.streak_week_start as string | null) ?? lastActivityStr;
+  const weekStart = new Date(weekStartStr);
+  const daysSinceWeekStart = Math.floor((today.getTime() - weekStart.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (daysSinceWeekStart < 7) {
+    // Still in same week slot — just extend the last_activity so the window doesn't shrink
+    await supabase
+      .from('food_passports')
+      .update({ last_activity_date: todayStr, updated_at: new Date().toISOString() })
+      .eq('user_id', userId);
+    return { weeks: passport.streak_days ?? 1, newWeek: false, milestone: false };
+  }
+
+  // New week slot completed — increment streak and award coins
+  const newStreak = (passport.streak_days ?? 0) + 1;
+  const milestone = newStreak % 5 === 0;
+  await supabase
+    .from('food_passports')
+    .update({ streak_days: newStreak, last_activity_date: todayStr, streak_week_start: todayStr, updated_at: new Date().toISOString() })
+    .eq('user_id', userId);
+
+  // Award weekly streak coins (fire and forget — don't block review flow)
+  const { awardCoins, COIN_AMOUNTS } = await import('./coins');
+  awardCoins(userId, COIN_AMOUNTS.streak_week, 'streak_week', `Week ${newStreak} streak`).catch(() => {});
+  if (milestone) {
+    awardCoins(userId, COIN_AMOUNTS.streak_milestone_5, 'streak_milestone', `${newStreak}-week streak milestone!`).catch(() => {});
+  }
+
+  return { weeks: newStreak, newWeek: true, milestone };
+}
+
 export async function updatePushToken(userId: string, token: string): Promise<void> {
   await supabase
     .from('users')
@@ -234,6 +343,19 @@ export async function checkUsernameAvailable(username: string): Promise<boolean>
     .eq('username', username.toLowerCase())
     .maybeSingle();
   return !data;
+}
+
+export async function searchUsers(query: string, excludeId?: string, limit = 20): Promise<User[]> {
+  const { data } = await supabase
+    .from('users')
+    .select('id, username, display_name, avatar_url, city, total_reviews, taste_profile')
+    .or(`display_name.ilike.%${query}%,username.ilike.%${query}%`)
+    .eq('is_active', true)
+    .order('total_reviews', { ascending: false })
+    .limit(limit);
+
+  const results = (data ?? []) as User[];
+  return excludeId ? results.filter(u => u.id !== excludeId) : results;
 }
 
 export async function getUserLists(userId: string): Promise<List[]> {

@@ -1,13 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, StyleSheet, TextInput, TouchableOpacity,
-  KeyboardAvoidingView, Platform, Alert, ScrollView,
+  KeyboardAvoidingView, Platform, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, radius } from '@/theme';
+import { toast } from '@/stores/toastStore';
+import { getPendingReferrer } from '@/lib/referral';
 import { Button } from '@/components/ui/Button';
 import { RText, H2, Body, Caption } from '@/components/ui/Text';
 
@@ -16,14 +18,19 @@ export default function RegisterScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [referrer, setReferrer] = useState<string | null>(null);
+
+  useEffect(() => {
+    getPendingReferrer().then(setReferrer).catch(() => {});
+  }, []);
 
   const handleRegister = async () => {
     if (!email.trim()) {
-      Alert.alert('Error', 'Please enter your email address.');
+      toast.error('Please enter your email address.');
       return;
     }
     if (password.length < 8) {
-      Alert.alert('Error', 'Password must be at least 8 characters.');
+      toast.error('Password must be at least 8 characters.');
       return;
     }
 
@@ -37,9 +44,9 @@ export default function RegisterScreen() {
         },
       });
       if (error) throw error;
-      // Auth state listener redirects to onboarding
+      router.replace('/(auth)/onboarding');
     } catch (error: unknown) {
-      Alert.alert('Sign up failed', error instanceof Error ? error.message : 'Please try again.');
+      toast.error(error instanceof Error ? error.message : 'Please try again.', 'Sign up failed');
     } finally {
       setIsLoading(false);
     }
@@ -61,6 +68,15 @@ export default function RegisterScreen() {
             <Body color={colors.textSecondary}>
               Join Malaysia's food community
             </Body>
+
+            {referrer && (
+              <View style={styles.referBanner}>
+                <RText style={{ fontSize: 18, lineHeight: 22 }}>🎁</RText>
+                <Caption color={colors.textSecondary} style={{ flex: 1, marginLeft: spacing[2] }}>
+                  Invited by <Caption color={colors.primary} style={{ fontWeight: '700' }}>@{referrer}</Caption> — you'll be connected once you post your first review.
+                </Caption>
+              </View>
+            )}
           </View>
 
           <View style={styles.form}>
@@ -167,6 +183,14 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   logoText: { fontSize: 22, fontWeight: '800', color: colors.white, letterSpacing: -1 },
+  referBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primarySurface,
+    borderRadius: radius.lg,
+    padding: spacing[3],
+    marginTop: spacing[4],
+  },
   form: { gap: spacing[5] },
   field: { gap: spacing[2] },
   label: { textTransform: 'uppercase', letterSpacing: 0.5 },

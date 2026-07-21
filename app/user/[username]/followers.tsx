@@ -29,7 +29,7 @@ export default function FollowersScreen() {
 
   const { data: followers, isLoading } = useQuery({
     queryKey: queryKeys.userFollowers(profileUser?.id ?? ''),
-    queryFn: () => getUserFollowers(profileUser!.id),
+    queryFn: () => getUserFollowers(profileUser!.id, 0, currentUser?.id),
     enabled: !!profileUser,
   });
 
@@ -76,7 +76,7 @@ export default function FollowersScreen() {
           )}
           ListEmptyComponent={
             <View style={styles.emptyState}>
-              <RText style={{ fontSize: 40 }}>👥</RText>
+              <RText style={{ fontSize: 40, lineHeight: 52 }}>👥</RText>
               <RText variant="titleMedium" style={{ marginTop: spacing[3] }}>No followers yet</RText>
               <Caption color={colors.textSecondary}>
                 When people follow {username}, they'll appear here.

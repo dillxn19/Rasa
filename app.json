@@ -41,7 +41,6 @@
         "RECEIVE_BOOT_COMPLETED",
         "VIBRATE"
       ],
-      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "bundler": "metro",
@@ -51,28 +50,13 @@
     "plugins": [
       "expo-router",
       "expo-font",
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/images/notification-icon.png",
-          "color": "#E8452A",
-          "sounds": ["./assets/sounds/notification.wav"]
-        }
-      ],
+      "expo-notifications",
       [
         "expo-image-picker",
         {
           "photosPermission": "Rasa needs access to your photos to share food experiences."
         }
       ],
-      [
-        "expo-location",
-        {
-          "locationAlwaysAndWhenInUsePermission": "Rasa uses location to find restaurants near you."
-        }
-      ],
-      "expo-blur",
-      "@gorhom/bottom-sheet"
     ],
     "experiments": {
       "typedRoutes": true

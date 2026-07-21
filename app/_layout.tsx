@@ -7,9 +7,13 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { StyleSheet } from 'react-native';
 import { queryClient } from '@/lib/queryClient';
 import { useAuthStore } from '@/stores/authStore';
+import { ToastHost } from '@/components/ui/Toast';
+import { ThemeProvider } from '@/theme/ThemeProvider';
+import { useReferralCapture } from '@/hooks/useReferralCapture';
 
 export default function RootLayout() {
   const { initialize, isInitialized } = useAuthStore();
+  useReferralCapture();
 
   useEffect(() => {
     initialize();
@@ -19,6 +23,7 @@ export default function RootLayout() {
     <GestureHandlerRootView style={styles.container}>
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
+          <ThemeProvider>
           <StatusBar style="dark" />
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="index" />
@@ -94,7 +99,30 @@ export default function RootLayout() {
                 animation: 'slide_from_bottom',
               }}
             />
+            <Stack.Screen
+              name="shop"
+              options={{
+                presentation: 'modal',
+                animation: 'slide_from_bottom',
+              }}
+            />
+            <Stack.Screen
+              name="review/[id]"
+              options={{
+                presentation: 'modal',
+                animation: 'slide_from_bottom',
+              }}
+            />
+            <Stack.Screen
+              name="recap"
+              options={{
+                presentation: 'fullScreenModal',
+                animation: 'slide_from_bottom',
+              }}
+            />
           </Stack>
+          <ToastHost />
+          </ThemeProvider>
         </QueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

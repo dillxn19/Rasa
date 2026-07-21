@@ -168,7 +168,7 @@ export default function ListScreen() {
           ))}
           {(list.items ?? []).length === 0 && (
             <View style={styles.empty}>
-              <RText style={{ fontSize: 40 }}>📋</RText>
+              <RText style={{ fontSize: 40, lineHeight: 52 }}>📋</RText>
               <Caption style={{ marginTop: spacing[3] }}>No restaurants in this list yet.</Caption>
             </View>
           )}

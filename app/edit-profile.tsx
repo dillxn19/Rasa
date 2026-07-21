@@ -7,7 +7,6 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +18,7 @@ import { RText, H3, Caption } from '@/components/ui/Text';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { useAuthStore } from '@/stores/authStore';
+import { toast } from '@/stores/toastStore';
 import { uploadAvatar } from '@/lib/supabase';
 import { MALAYSIA_CITIES } from '@/types';
 
@@ -46,7 +46,7 @@ export default function EditProfileScreen() {
 
   const handleSave = async () => {
     if (!displayName.trim()) {
-      Alert.alert('Required', 'Display name cannot be empty.');
+      toast.error('Display name cannot be empty.', 'Required');
       return;
     }
     if (!profile) return;
@@ -57,8 +57,8 @@ export default function EditProfileScreen() {
       // Upload new avatar if changed
       if (avatarUri && avatarUri !== profile.avatar_url) {
         const response = await fetch(avatarUri);
-        const blob = await response.blob();
-        avatarUrl = await uploadAvatar(profile.id, blob);
+        const arrayBuffer = await response.arrayBuffer();
+        avatarUrl = await uploadAvatar(profile.id, arrayBuffer);
       }
 
       await updateProfile({
@@ -70,7 +70,7 @@ export default function EditProfileScreen() {
 
       router.back();
     } catch (e) {
-      Alert.alert('Error', 'Failed to save profile. Please try again.');
+      toast.error('Failed to save profile. Please try again.');
     } finally {
       setIsLoading(false);
     }
