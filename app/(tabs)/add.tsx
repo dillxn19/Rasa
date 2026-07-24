@@ -2,7 +2,7 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, StyleSheet, ScrollView, TextInput, TouchableOpacity,
   Image as RNImage, KeyboardAvoidingView, Platform, ActivityIndicator,
-  Keyboard,
+  Keyboard, Modal,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,7 +11,7 @@ import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Animated, { useSharedValue, withSpring, useAnimatedStyle } from 'react-native-reanimated';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import { MonthCalendar } from '@/components/ui/MonthCalendar';
 import { colors, spacing, radius, shadows } from '@/theme';
 import { RText, H4, Caption } from '@/components/ui/Text';
 import { Button } from '@/components/ui/Button';
@@ -19,13 +19,21 @@ import { Avatar } from '@/components/ui/Avatar';
 import { RatingPicker } from '@/components/ui/StarRating';
 import { useAuthStore } from '@/stores/authStore';
 import { useSettingsStore } from '@/stores/settingsStore';
-import { submitReview, getUserReviewForRestaurant, saveRestaurant, unsaveRestaurant, searchRestaurantsSupabase } from '@/services/restaurants';
+import { submitReview, getUserReviewForRestaurant, saveRestaurant, unsaveRestaurant } from '@/services/restaurants';
+import { searchDishes, tagDish } from '@/services/dishes';
+import {
+  searchPlaces, resolvePlace, rasaHitToAlgolia, startPlacesSession, endPlacesSession,
+  type PlacesSearchResult,
+} from '@/services/places';
 import { awardReviewRewards } from '@/services/rewards';
+import { track } from '@/lib/analytics';
+import { useUserLocation } from '@/hooks/useUserLocation';
+import { moderateImage } from '@/services/moderation';
 import { ReviewSuccessOverlay, type ReviewSuccessData } from '@/components/ui/ReviewSuccessOverlay';
 import { toast } from '@/stores/toastStore';
 import { uploadReviewPhoto, supabase } from '@/lib/supabase';
-import { searchRestaurants } from '@/lib/algolia';
-import { invalidateAfterReview } from '@/lib/queryClient';
+import { invalidateAfterReview, queryKeys } from '@/lib/queryClient';
+import { RankCompareModal } from '@/components/reviews/RankCompareModal';
 import type { AlgoliaRestaurant } from '@/types';
 import { CATEGORY_LABELS } from '@/types';
 
@@ -53,6 +61,9 @@ export default function AddReviewScreen() {
   const { halalOnly } = useSettingsStore();
   const qc = useQueryClient();
   const insets = useSafeAreaInsets();
+  const location = useUserLocation();
+  const locationRef = useRef(location.coords);
+  locationRef.current = location.coords;
 
   // URL params for pre-selected restaurant (from restaurant screen "Rate" button)
   const { restaurantId: preId, restaurantName: preName, restaurantCategory: preCat, restaurantCity: preCity } =
@@ -75,12 +86,23 @@ export default function AddReviewScreen() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [success, setSuccess] = useState<ReviewSuccessData | null>(null);
+  const [rankCtx, setRankCtx] = useState<{ reviewId: string; restaurantName: string; rating: number } | null>(null);
+  const pendingSuccess = useRef<ReviewSuccessData | null>(null);
+
+  // Dish tagging (details step — "What did you eat here?")
+  type TaggedDish = { id?: string; name: string };
+  const [taggedDishes, setTaggedDishes] = useState<TaggedDish[]>([]);
+  const [dishQuery, setDishQuery] = useState('');
+  const [debouncedDishQuery, setDebouncedDishQuery] = useState('');
+  const dishDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<AlgoliaRestaurant[]>([]);
+  const [placeResults, setPlaceResults] = useState<PlacesSearchResult>({ rasa: [], google: [] });
   const [isSearching, setIsSearching] = useState(false);
+  const [resolvingPlaceId, setResolvingPlaceId] = useState<string | null>(null);
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const currentSessionActive = useRef(false);
 
   // Existing review check (rating step)
   const { data: existingReview } = useQuery({
@@ -140,6 +162,39 @@ export default function AddReviewScreen() {
     peopleDebounceRef.current = setTimeout(() => setDebouncedPeopleQuery(text), 250);
   };
 
+  // Dish suggestions for the tagging section (details step)
+  const { data: dishSuggestions = [] } = useQuery({
+    queryKey: ['dishSearch', debouncedDishQuery],
+    queryFn: () => searchDishes(debouncedDishQuery, 6),
+    enabled: debouncedDishQuery.trim().length >= 2 && step === 'details',
+  });
+
+  const handleDishSearch = (text: string) => {
+    setDishQuery(text);
+    if (dishDebounceRef.current) clearTimeout(dishDebounceRef.current);
+    dishDebounceRef.current = setTimeout(() => setDebouncedDishQuery(text), 250);
+  };
+
+  const addTaggedDish = (dish: TaggedDish) => {
+    const name = dish.name.trim();
+    if (!name) return;
+    // Dedupe by id when known, otherwise by lowercased name.
+    const exists = taggedDishes.some(d =>
+      dish.id ? d.id === dish.id : d.name.toLowerCase() === name.toLowerCase()
+    );
+    if (!exists) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      setTaggedDishes(prev => [...prev, { id: dish.id, name }]);
+    }
+    setDishQuery('');
+    setDebouncedDishQuery('');
+    Keyboard.dismiss();
+  };
+
+  const removeTaggedDish = (name: string) => {
+    setTaggedDishes(prev => prev.filter(d => d.name !== name));
+  };
+
   // Pre-select restaurant from URL params (e.g. when navigated from restaurant screen)
   useEffect(() => {
     if (preId && preName && step === 'restaurant' && !restaurant) {
@@ -167,8 +222,8 @@ export default function AddReviewScreen() {
 
   const submitMutation = useMutation({
     mutationFn: async () => {
-      if (!profile || !restaurant || rating === 0) return;
-      await submitReview({
+      if (!profile || !restaurant || rating === 0) return null;
+      return await submitReview({
         user_id: profile.id,
         restaurant_id: restaurant.objectID,
         rating,
@@ -178,7 +233,7 @@ export default function AddReviewScreen() {
         visit_date: visitDate.toISOString().split('T')[0],
       });
     },
-    onSuccess: async () => {
+    onSuccess: async (review) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       if (!profile || !restaurant) return;
       const rid = restaurant.objectID;
@@ -190,6 +245,15 @@ export default function AddReviewScreen() {
         isNewReview: !existingReview,
       }).catch(() => null);
 
+      track('review_submitted', { rating, is_new: !existingReview, has_photos: photos.length > 0 });
+
+      // Community dish tags — crowd-sources the dish graph. Fire-and-forget,
+      // no coins (un-farmable). A new dish is created server-side if free-typed.
+      taggedDishes.forEach(d => {
+        tagDish({ userId: profile.id, restaurantId: rid, dishId: d.id, dishName: d.id ? undefined : d.name })
+          .catch(() => {});
+      });
+
       // Auto-remove bookmark now that it's been rated
       if (savedIds?.has(rid)) {
         unsaveRestaurant(profile.id, rid).catch(() => {});
@@ -198,7 +262,7 @@ export default function AddReviewScreen() {
       // Single source of truth: refresh everything that shows review counts
       invalidateAfterReview(qc, profile.id, rid);
 
-      setSuccess({
+      const successData = {
         coinsEarned: rewards?.coinsEarned ?? (existingReview ? 0 : 25),
         streakWeeks: rewards?.streakWeeks ?? null,
         isNewWeek: rewards?.isNewWeek ?? false,
@@ -207,7 +271,16 @@ export default function AddReviewScreen() {
         isEdit: rewards?.isEdit ?? !!existingReview,
         cappedDaily: rewards?.cappedDaily ?? false,
         restaurantName: restaurant.name,
-      });
+      };
+
+      // Beli-style: slot this place among your other same-star places first,
+      // then show the reward. Only for new ratings (edits keep their spot).
+      if (review?.id && !existingReview) {
+        pendingSuccess.current = successData;
+        setRankCtx({ reviewId: review.id, restaurantName: restaurant.name, rating });
+      } else {
+        setSuccess(successData);
+      }
     },
     onError: () => toast.error('Could not post your review. Try again.'),
   });
@@ -220,38 +293,35 @@ export default function AddReviewScreen() {
     setPhotos([]);
     setVisitDate(new Date());
     setSearchQuery('');
-    setSearchResults([]);
+    setPlaceResults({ rasa: [], google: [] });
+    endPlacesSession();
+    setTaggedDishes([]);
+    setDishQuery('');
+    setDebouncedDishQuery('');
   }
 
+  // Beli-style hybrid search: Rasa's own places first, then Google Places for
+  // everything else. Guarantees any real restaurant (incl. chain branches) is
+  // findable and matched to a single canonical Google location.
   const handleSearch = useCallback((query: string) => {
     setSearchQuery(query);
     if (searchTimeout.current) clearTimeout(searchTimeout.current);
-    if (query.length < 2) { setSearchResults([]); return; }
+    if (query.length < 2) { setPlaceResults({ rasa: [], google: [] }); endPlacesSession(); return; }
+    if (!currentSessionActive.current) { startPlacesSession(); currentSessionActive.current = true; }
 
     setIsSearching(true);
     searchTimeout.current = setTimeout(async () => {
       try {
-        const result = await searchRestaurants({
-          query,
-          hitsPerPage: 8,
-          ...(halalOnly ? { dietary: ['halal_certified'] } : {}),
-        });
-        // Fall back to Postgres when Algolia has no hits (e.g. index not seeded).
-        if (result.hits.length > 0) {
-          setSearchResults(result.hits);
-        } else {
-          const fb = await searchRestaurantsSupabase(query, { halalOnly }).catch(() => []);
-          setSearchResults(fb);
-        }
+        const c = locationRef.current;
+        const res = await searchPlaces(query, c ? { lat: c.lat, lng: c.lng } : {});
+        setPlaceResults(res);
       } catch {
-        // Algolia errored/unconfigured — go straight to Postgres.
-        const fb = await searchRestaurantsSupabase(query, { halalOnly }).catch(() => []);
-        setSearchResults(fb);
+        setPlaceResults({ rasa: [], google: [] });
       } finally {
         setIsSearching(false);
       }
     }, 300);
-  }, [halalOnly]);
+  }, []);
 
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -270,6 +340,12 @@ export default function AddReviewScreen() {
           const ext = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
           const mime = ext === 'png' ? 'image/png' : ext === 'heic' ? 'image/heic' : 'image/jpeg';
           const url = await uploadReviewPhoto(profile.id, arrayBuffer, mime);
+          // Scan for inappropriate content before showing it (fails open).
+          const safe = await moderateImage(url);
+          if (!safe) {
+            toast.error('That photo looks inappropriate and was not added.');
+            continue;
+          }
           setPhotos(prev => [...prev, url]);
         }
       } catch (e: any) {
@@ -294,7 +370,12 @@ export default function AddReviewScreen() {
         const response = await fetch(asset.uri);
         const arrayBuffer = await response.arrayBuffer();
         const url = await uploadReviewPhoto(profile.id, arrayBuffer, 'image/jpeg');
-        setPhotos(prev => [...prev, url]);
+        const safe = await moderateImage(url);
+        if (!safe) {
+          toast.error('That photo looks inappropriate and was not added.');
+        } else {
+          setPhotos(prev => [...prev, url]);
+        }
       } catch (e: any) {
         toast.error(e?.message ?? 'Could not upload photo.', 'Upload failed');
       } finally {
@@ -313,9 +394,47 @@ export default function AddReviewScreen() {
   // Beli-style "+" on a search result: pick it and jump straight to rating.
   const selectAndRate = (r: AlgoliaRestaurant) => {
     setRestaurant(r);
-    setSearchResults([]);
+    setPlaceResults({ rasa: [], google: [] });
     setSearchQuery('');
+    currentSessionActive.current = false;
     goToRate(r);
+  };
+
+  // Selecting a Google result: resolve the place_id → canonical Rasa row
+  // (get-or-create), then rate. This is what guarantees one row per real place.
+  const selectGoogleAndRate = async (placeId: string, nameHint?: string) => {
+    if (resolvingPlaceId) return;
+    setResolvingPlaceId(placeId);
+    try {
+      const r = await resolvePlace(placeId, nameHint);
+      currentSessionActive.current = false;
+      if (r) {
+        selectAndRate(r);
+      } else {
+        toast.error('Could not load that place. Try again.');
+      }
+    } catch {
+      toast.error('Could not load that place. Try again.');
+    } finally {
+      setResolvingPlaceId(null);
+    }
+  };
+
+  // Tapping a Google result's name opens its restaurant page (like Rasa rows),
+  // rather than jumping straight into rating. Rating stays an explicit "+".
+  const selectGoogleAndOpen = async (placeId: string, nameHint?: string) => {
+    if (resolvingPlaceId) return;
+    setResolvingPlaceId(placeId);
+    try {
+      const r = await resolvePlace(placeId, nameHint);
+      currentSessionActive.current = false;
+      if (r) router.push(`/restaurant/${r.objectID}`);
+      else toast.error('Could not load that place. Try again.');
+    } catch {
+      toast.error('Could not load that place. Try again.');
+    } finally {
+      setResolvingPlaceId(null);
+    }
   };
 
   // Beli-style bookmark on a search result: quick-save without rating.
@@ -349,7 +468,7 @@ export default function AddReviewScreen() {
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={safeTop}
+        keyboardVerticalOffset={0}
       >
         {/* Header */}
         <View style={[styles.header, { paddingTop: safeTop + spacing[2] }]}>
@@ -399,7 +518,7 @@ export default function AddReviewScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.addTab, addTab === 'people' && styles.addTabActive]}
-                onPress={() => { setAddTab('people'); setSearchQuery(''); setSearchResults([]); }}
+                onPress={() => { setAddTab('people'); setSearchQuery(''); setPlaceResults({ rasa: [], google: [] }); endPlacesSession(); currentSessionActive.current = false; }}
               >
                 <Ionicons name="people" size={14} color={addTab === 'people' ? colors.primary : colors.textTertiary} style={{ marginRight: 4 }} />
                 <RText variant="labelMedium" color={addTab === 'people' ? colors.primary : colors.textTertiary}
@@ -418,21 +537,24 @@ export default function AddReviewScreen() {
                     placeholderTextColor={colors.textTertiary}
                     value={searchQuery}
                     onChangeText={handleSearch}
+                    onFocus={() => location.request()}
                     autoFocus
                     returnKeyType="search"
                   />
                   {isSearching && <ActivityIndicator size="small" color={colors.primary} />}
                   {searchQuery.length > 0 && !isSearching && (
-                    <TouchableOpacity onPress={() => { setSearchQuery(''); setSearchResults([]); }}>
+                    <TouchableOpacity onPress={() => { setSearchQuery(''); setPlaceResults({ rasa: [], google: [] }); endPlacesSession(); currentSessionActive.current = false; }}>
                       <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
                     </TouchableOpacity>
                   )}
                 </View>
 
-                {searchResults.length > 0 ? (
+                {(placeResults.rasa.length > 0 || placeResults.google.length > 0) ? (
                   <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
                     <View style={styles.resultsList}>
-                      {searchResults.map(r => {
+                      {/* Rasa's own places first (carry social data) */}
+                      {placeResults.rasa.map(hit => {
+                        const r = rasaHitToAlgolia(hit);
                         const reviewed = reviewedIds?.has(r.objectID);
                         const saved = savedIds?.has(r.objectID);
                         return (
@@ -442,17 +564,10 @@ export default function AddReviewScreen() {
                                 <Ionicons name="restaurant" size={18} color={colors.primary} />
                               </View>
                               <View style={{ flex: 1 }}>
-                                <View style={styles.resultNameRow}>
-                                  <RText variant="titleSmall" numberOfLines={1} style={{ flexShrink: 1 }}>{r.name}</RText>
-                                  {r.dietary_options?.includes('halal_certified') && (
-                                    <View style={styles.halalTag}>
-                                      <Caption color={colors.halal} style={{ fontWeight: '700', fontSize: 10 }}>HALAL</Caption>
-                                    </View>
-                                  )}
-                                </View>
+                                <RText variant="titleSmall" numberOfLines={1} style={{ flexShrink: 1 }}>{r.name}</RText>
                                 <View style={styles.resultMeta}>
                                   <Caption>{CATEGORY_LABELS[r.category] ?? r.category}</Caption>
-                                  <Caption color={colors.textTertiary}> · {r.area ?? r.city}</Caption>
+                                  <Caption color={colors.textTertiary}> · {r.area || r.city}</Caption>
                                   {r.price_range ? <Caption color={colors.textTertiary}> · {r.price_range}</Caption> : null}
                                 </View>
                               </View>
@@ -466,11 +581,7 @@ export default function AddReviewScreen() {
                             ) : (
                               <View style={styles.resultActions}>
                                 <TouchableOpacity style={styles.resultIconBtn} onPress={() => toggleSave(r)} hitSlop={6}>
-                                  <Ionicons
-                                    name={saved ? 'bookmark' : 'bookmark-outline'}
-                                    size={20}
-                                    color={saved ? colors.accent : colors.textSecondary}
-                                  />
+                                  <Ionicons name={saved ? 'bookmark' : 'bookmark-outline'} size={20} color={saved ? colors.accent : colors.textSecondary} />
                                 </TouchableOpacity>
                                 <TouchableOpacity style={styles.resultRateBtn} onPress={() => selectAndRate(r)} activeOpacity={0.85}>
                                   <Ionicons name="add" size={22} color={colors.white} />
@@ -480,6 +591,40 @@ export default function AddReviewScreen() {
                           </View>
                         );
                       })}
+
+                      {/* Google Places for the long tail — rendered identically to
+                          Rasa rows (Beli-style, no visible split). */}
+                      {false && placeResults.google.length > 0 && (
+                        <View style={styles.googleHeaderRow}>
+                          <Ionicons name="globe-outline" size={13} color={colors.textTertiary} />
+                          <Caption color={colors.textTertiary} style={{ marginLeft: 5, letterSpacing: 0.4 }}>MORE PLACES ON GOOGLE</Caption>
+                        </View>
+                      )}
+                      {placeResults.google.map(g => (
+                        <View key={g.placeId} style={styles.resultRow}>
+                          <TouchableOpacity
+                            style={styles.resultMain}
+                            onPress={() => selectGoogleAndOpen(g.placeId, g.name)}
+                            activeOpacity={0.7}
+                            disabled={!!resolvingPlaceId}
+                          >
+                            <View style={styles.resultIcon}>
+                              <Ionicons name="restaurant" size={18} color={colors.primary} />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <RText variant="titleSmall" numberOfLines={1} style={{ flexShrink: 1 }}>{g.name}</RText>
+                              {!!g.secondary && <Caption color={colors.textTertiary} numberOfLines={1}>{g.secondary}</Caption>}
+                            </View>
+                          </TouchableOpacity>
+                          {resolvingPlaceId === g.placeId ? (
+                            <ActivityIndicator size="small" color={colors.primary} style={{ marginRight: spacing[2] }} />
+                          ) : (
+                            <TouchableOpacity style={styles.resultRateBtn} onPress={() => selectGoogleAndRate(g.placeId, g.name)} activeOpacity={0.85} disabled={!!resolvingPlaceId}>
+                              <Ionicons name="add" size={22} color={colors.white} />
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      ))}
                     </View>
                   </ScrollView>
                 ) : searchQuery.length >= 2 && !isSearching ? (
@@ -493,10 +638,10 @@ export default function AddReviewScreen() {
                   <View style={styles.searchPrompt}>
                     <RText style={{ fontSize: 48, lineHeight: 58, textAlign: 'center' }}>🔍</RText>
                     <RText variant="bodyMedium" color={colors.textSecondary} align="center" style={{ marginTop: spacing[3] }}>
-                      Start typing to search{'\n'}restaurants near you
+                      Search any restaurant{'\n'}in Malaysia
                     </RText>
                     <Caption color={colors.textTertiary} align="center" style={{ marginTop: spacing[2] }}>
-                      {halalOnly ? 'Showing halal certified only' : 'All restaurants'}
+                      Powered by Google — every location, every branch
                     </Caption>
                   </View>
                 ) : null}
@@ -661,41 +806,69 @@ export default function AddReviewScreen() {
               <Caption color={colors.textTertiary} align="right">{500 - content.length} chars left</Caption>
             </View>
 
+            {/* What did you eat? — community dish tags */}
+            <View style={styles.detailSection}>
+              <Caption style={{ marginBottom: spacing[2] }}>What did you eat here? <RText variant="caption" color={colors.textTertiary}>(optional)</RText></Caption>
+
+              {taggedDishes.length > 0 && (
+                <View style={styles.dishChipRow}>
+                  {taggedDishes.map(d => (
+                    <TouchableOpacity key={d.name} style={styles.dishChip} onPress={() => removeTaggedDish(d.name)} activeOpacity={0.7}>
+                      <RText variant="labelMedium" color={colors.primary}>{d.name}</RText>
+                      <Ionicons name="close" size={13} color={colors.primary} style={{ marginLeft: 4 }} />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+
+              <View style={styles.dishSearchBox}>
+                <Ionicons name="restaurant-outline" size={16} color={colors.textTertiary} />
+                <TextInput
+                  style={styles.dishSearchInput}
+                  placeholder="e.g. Nasi Lemak, Teh Tarik…"
+                  placeholderTextColor={colors.textTertiary}
+                  value={dishQuery}
+                  onChangeText={handleDishSearch}
+                  returnKeyType="done"
+                  onSubmitEditing={() => dishQuery.trim() && addTaggedDish({ name: dishQuery })}
+                  blurOnSubmit
+                />
+              </View>
+
+              {dishQuery.trim().length >= 2 && (
+                <View style={styles.dishSuggestions}>
+                  {dishSuggestions.map(dish => (
+                    <TouchableOpacity key={dish.id} style={styles.dishSuggestionRow} onPress={() => addTaggedDish({ id: dish.id, name: dish.name })}>
+                      <Ionicons name="add-circle-outline" size={18} color={colors.primary} />
+                      <RText variant="bodyMedium" style={{ marginLeft: spacing[2] }}>{dish.name}</RText>
+                    </TouchableOpacity>
+                  ))}
+                  {/* Free-text add when no exact match */}
+                  {!dishSuggestions.some(d => d.name.toLowerCase() === dishQuery.trim().toLowerCase()) && (
+                    <TouchableOpacity style={styles.dishSuggestionRow} onPress={() => addTaggedDish({ name: dishQuery })}>
+                      <Ionicons name="add-circle" size={18} color={colors.success} />
+                      <RText variant="bodyMedium" style={{ marginLeft: spacing[2] }}>
+                        Add "<RText variant="bodyMedium" style={{ fontWeight: '700' }}>{dishQuery.trim()}</RText>"
+                      </RText>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+              <Caption color={colors.textTertiary} style={{ marginTop: spacing[2] }}>
+                Helps others find this dish here
+              </Caption>
+            </View>
+
             {/* Visit date */}
             <View style={styles.detailSection}>
               <Caption style={{ marginBottom: spacing[3] }}>When did you go?</Caption>
-              <View style={styles.tagRow}>
-                <TouchableOpacity
-                  style={[styles.mealTag, isSameDay(visitDate, new Date()) && styles.mealTagActive]}
-                  onPress={() => setVisitDate(new Date())}
-                >
-                  <RText style={{ fontSize: 13, color: isSameDay(visitDate, new Date()) ? colors.primary : colors.textSecondary }}>Today</RText>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.mealTag, isSameDay(visitDate, yesterday()) && styles.mealTagActive]}
-                  onPress={() => setVisitDate(yesterday())}
-                >
-                  <RText style={{ fontSize: 13, color: isSameDay(visitDate, yesterday()) ? colors.primary : colors.textSecondary }}>Yesterday</RText>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.dateBtn} onPress={() => setShowDatePicker(true)}>
-                  <Ionicons name="calendar-outline" size={15} color={colors.textSecondary} />
-                  <RText style={{ fontSize: 13, color: colors.textSecondary, marginLeft: 6 }}>
-                    {visitDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                  </RText>
-                </TouchableOpacity>
-              </View>
-              {showDatePicker && (
-                <DateTimePicker
-                  value={visitDate}
-                  mode="date"
-                  maximumDate={new Date()}
-                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                  onChange={(_, d) => {
-                    setShowDatePicker(Platform.OS === 'ios');
-                    if (d) setVisitDate(d);
-                  }}
-                />
-              )}
+              <TouchableOpacity style={styles.dateBtnFull} onPress={() => setShowDatePicker(true)}>
+                <Ionicons name="calendar-outline" size={18} color={colors.primary} />
+                <RText variant="titleSmall" style={{ marginLeft: spacing[2] }}>
+                  {visitDate.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })}
+                </RText>
+                <Ionicons name="chevron-down" size={16} color={colors.textTertiary} style={{ marginLeft: 'auto' }} />
+              </TouchableOpacity>
             </View>
 
             {/* Privacy */}
@@ -733,6 +906,38 @@ export default function AddReviewScreen() {
           </ScrollView>
         )}
       </KeyboardAvoidingView>
+
+      {rankCtx && profile && (
+        <RankCompareModal
+          visible
+          userId={profile.id}
+          reviewId={rankCtx.reviewId}
+          restaurantName={rankCtx.restaurantName}
+          rating={rankCtx.rating}
+          onDone={() => {
+            setRankCtx(null);
+            qc.invalidateQueries({ queryKey: queryKeys.userReviews(profile.id) });
+            if (pendingSuccess.current) {
+              setSuccess(pendingSuccess.current);
+              pendingSuccess.current = null;
+            }
+          }}
+        />
+      )}
+
+      {/* Visit-date calendar (pure JS — works in Expo Go) */}
+      <Modal transparent visible={showDatePicker} animationType="fade" onRequestClose={() => setShowDatePicker(false)}>
+        <TouchableOpacity style={styles.calOverlay} activeOpacity={1} onPress={() => setShowDatePicker(false)}>
+          <TouchableOpacity activeOpacity={1} style={styles.calCard}>
+            <RText variant="h4" style={{ marginBottom: spacing[2] }}>When did you go?</RText>
+            <MonthCalendar
+              value={visitDate}
+              onChange={(d) => { setVisitDate(d); setShowDatePicker(false); }}
+              maximumDate={new Date()}
+            />
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
 
       {success && (
         <ReviewSuccessOverlay
@@ -817,11 +1022,20 @@ const styles = StyleSheet.create({
   },
   resultsList: {
     paddingHorizontal: spacing[4],
+    paddingBottom: spacing[8],
+  },
+  googleTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.gray100,
+    borderRadius: radius.full,
+    paddingHorizontal: spacing[2],
+    paddingVertical: 2,
   },
   resultRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing[3],
+    paddingVertical: spacing[4],
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
     gap: spacing[2],
@@ -855,6 +1069,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[2],
+  },
+  googleHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: spacing[4],
+    paddingBottom: spacing[2],
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+    marginTop: spacing[2],
   },
   resultIconBtn: { padding: spacing[1] },
   resultRateBtn: {
@@ -1000,6 +1223,54 @@ const styles = StyleSheet.create({
     gap: spacing[2],
     flexWrap: 'wrap',
   },
+  dishChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing[2],
+    marginBottom: spacing[3],
+  },
+  dishChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: spacing[3],
+    paddingRight: spacing[2],
+    paddingVertical: spacing[2],
+    borderRadius: radius.full,
+    backgroundColor: colors.primarySurface,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  dishSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.gray100,
+    borderRadius: radius.lg,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[3],
+    gap: spacing[2],
+  },
+  dishSearchInput: {
+    flex: 1,
+    fontSize: 15,
+    color: colors.textPrimary,
+    padding: 0,
+  },
+  dishSuggestions: {
+    marginTop: spacing[2],
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  dishSuggestionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[3],
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
   mealTag: {
     paddingHorizontal: spacing[3],
     paddingVertical: spacing[2],
@@ -1021,6 +1292,30 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: colors.border,
     backgroundColor: colors.surface,
+  },
+  dateBtnFull: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[4],
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  calOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(20,14,10,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing[6],
+  },
+  calCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: colors.surface,
+    borderRadius: radius['3xl'],
+    padding: spacing[5],
   },
   privacyRow: {
     flexDirection: 'row',

@@ -9,7 +9,7 @@ import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { colors, spacing, radius } from '@/theme';
 import { toast } from '@/stores/toastStore';
-import { getPendingReferrer } from '@/lib/referral';
+import { getPendingReferrer, setPendingReferrer } from '@/lib/referral';
 import { Button } from '@/components/ui/Button';
 import { RText, H2, Body, Caption } from '@/components/ui/Text';
 
@@ -19,9 +19,13 @@ export default function RegisterScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [referrer, setReferrer] = useState<string | null>(null);
+  const [refCode, setRefCode] = useState('');
 
   useEffect(() => {
-    getPendingReferrer().then(setReferrer).catch(() => {});
+    getPendingReferrer().then((r) => {
+      setReferrer(r);
+      if (r) setRefCode(r.toUpperCase());
+    }).catch(() => {});
   }, []);
 
   const handleRegister = async () => {
@@ -44,6 +48,9 @@ export default function RegisterScreen() {
         },
       });
       if (error) throw error;
+      // Persist a typed/link referral code so onboarding records it after signup.
+      const ref = refCode.trim();
+      if (ref) await setPendingReferrer(ref);
       router.replace('/(auth)/onboarding');
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : 'Please try again.', 'Sign up failed');
@@ -137,6 +144,25 @@ export default function RegisterScreen() {
                 </View>
               )}
             </View>
+
+            {!referrer && (
+              <View style={styles.field}>
+                <RText variant="labelMedium" color={colors.textSecondary} style={styles.label}>
+                  Referral code (optional)
+                </RText>
+                <TextInput
+                  style={styles.input}
+                  value={refCode}
+                  onChangeText={(t) => setRefCode(t.toUpperCase())}
+                  placeholder="e.g. MK7Q27"
+                  placeholderTextColor={colors.textTertiary}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  maxLength={10}
+                  returnKeyType="done"
+                />
+              </View>
+            )}
 
             <Caption color={colors.textTertiary} align="center">
               By signing up, you agree to our Terms of Service and Privacy Policy.

@@ -26,6 +26,12 @@ import { getSavedRestaurants } from '@/services/restaurants';
 import { queryKeys } from '@/lib/queryClient';
 import { TASTE_PROFILE_LABELS, CATEGORY_LABELS } from '@/types';
 import { shareViaWhatsApp } from '@/lib/share';
+import { blockUser } from '@/services/moderation';
+import { ReportSheet } from '@/components/ui/ReportSheet';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { toast } from '@/stores/toastStore';
+import { track } from '@/lib/analytics';
+import { Modal } from 'react-native';
 import type { Review, Restaurant } from '@/types';
 
 type ContentTab = 'reviews' | 'saved';
@@ -87,6 +93,25 @@ export default function UserProfileScreen() {
     },
   });
 
+  const [showMenu, setShowMenu] = useState(false);
+  const [showReport, setShowReport] = useState(false);
+  const [showBlockConfirm, setShowBlockConfirm] = useState(false);
+  const blockMutation = useMutation({
+    mutationFn: async () => {
+      if (!currentUser || !user) return;
+      await blockUser(currentUser.id, user.id);
+    },
+    onSuccess: () => {
+      setShowBlockConfirm(false);
+      track('user_blocked');
+      qc.invalidateQueries({ queryKey: queryKeys.user(username) });
+      qc.invalidateQueries({ queryKey: ['blockedIds', currentUser?.id] });
+      toast.success(`You blocked @${user?.username}`);
+      router.back();
+    },
+    onError: () => toast.error('Could not block. Try again.'),
+  });
+
   const filteredReviews = useMemo(() => {
     const categories = FILTER_MAP[reviewFilter] ?? [];
     const filtered = categories.length === 0
@@ -118,12 +143,19 @@ export default function UserProfileScreen() {
               <TouchableOpacity style={styles.navBtn} onPress={() => router.back()}>
                 <Ionicons name="arrow-back" size={22} color={colors.white} />
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.navBtn}
-                onPress={() => shareViaWhatsApp(`Check out ${user.display_name}'s food reviews on Rasa! rasa.my/user/${user.username}`)}
-              >
-                <Ionicons name="share-outline" size={22} color={colors.white} />
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', gap: spacing[2] }}>
+                <TouchableOpacity
+                  style={styles.navBtn}
+                  onPress={() => shareViaWhatsApp(`Check out ${user.display_name}'s food reviews on Rasa! rasa.my/user/${user.username}`)}
+                >
+                  <Ionicons name="share-outline" size={22} color={colors.white} />
+                </TouchableOpacity>
+                {!isOwnProfile && (
+                  <TouchableOpacity style={styles.navBtn} onPress={() => setShowMenu(true)}>
+                    <Ionicons name="ellipsis-horizontal" size={22} color={colors.white} />
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
           </SafeAreaView>
         </View>
@@ -318,6 +350,47 @@ export default function UserProfileScreen() {
 
         <View style={{ height: spacing[10] }} />
       </ScrollView>
+
+      {/* More menu (report / block) */}
+      <Modal transparent visible={showMenu} animationType="fade" onRequestClose={() => setShowMenu(false)}>
+        <TouchableOpacity style={styles.menuOverlay} activeOpacity={1} onPress={() => setShowMenu(false)}>
+          <View style={styles.menuSheet}>
+            <View style={styles.menuHandle} />
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => { setShowMenu(false); setShowReport(true); }}
+            >
+              <Ionicons name="flag-outline" size={20} color={colors.textPrimary} />
+              <RText variant="titleSmall" style={{ marginLeft: spacing[3] }}>Report @{user.username}</RText>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => { setShowMenu(false); setShowBlockConfirm(true); }}
+            >
+              <Ionicons name="ban-outline" size={20} color={colors.error} />
+              <RText variant="titleSmall" color={colors.error} style={{ marginLeft: spacing[3] }}>Block @{user.username}</RText>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      <ReportSheet
+        visible={showReport}
+        target={{ reporterId: currentUser?.id ?? '', userId: user.id }}
+        targetLabel={`@${user.username}`}
+        onClose={() => setShowReport(false)}
+      />
+
+      <ConfirmDialog
+        visible={showBlockConfirm}
+        title={`Block @${user.username}?`}
+        message="You won't see each other's reviews or profiles, and any follow between you will be removed."
+        confirmLabel="Block"
+        destructive
+        loading={blockMutation.isPending}
+        onConfirm={() => blockMutation.mutate()}
+        onCancel={() => setShowBlockConfirm(false)}
+      />
     </View>
   );
 }
@@ -352,6 +425,16 @@ const styles = StyleSheet.create({
     backgroundColor: colors.blackTransparent40,
     alignItems: 'center', justifyContent: 'center',
   },
+  menuOverlay: { flex: 1, backgroundColor: 'rgba(20,14,10,0.55)', justifyContent: 'flex-end' },
+  menuSheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius['3xl'],
+    borderTopRightRadius: radius['3xl'],
+    padding: spacing[4],
+    paddingBottom: spacing[10],
+  },
+  menuHandle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: spacing[3] },
+  menuItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing[4], paddingHorizontal: spacing[2] },
 
   profileSection: {
     paddingHorizontal: spacing[4],

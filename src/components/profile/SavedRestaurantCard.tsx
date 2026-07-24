@@ -1,27 +1,12 @@
 import React from 'react';
 import { View, TouchableOpacity, StyleSheet } from 'react-native';
-import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { colors, spacing, radius, shadows } from '@/theme';
 import { RText, Caption } from '@/components/ui/Text';
+import { CoverImage } from '@/components/restaurants/CoverImage';
 import { CATEGORY_LABELS } from '@/types';
 import type { Restaurant } from '@/types';
-
-// Standardized, tinted fallback per category so missing photos look intentional
-// (never a blank/random image).
-const CATEGORY_STYLE: Record<string, { emoji: string; bg: string }> = {
-  hawker:       { emoji: '🍜', bg: '#FDECE6' },
-  mamak:        { emoji: '🫓', bg: '#E9F5EC' },
-  cafe:         { emoji: '☕', bg: '#EFEAF7' },
-  kopitiam:     { emoji: '🍳', bg: '#F5ECDC' },
-  fine_dining:  { emoji: '🥂', bg: '#E7EEFB' },
-  food_court:   { emoji: '🍱', bg: '#FCE9F1' },
-  night_market: { emoji: '🌙', bg: '#ECE7F7' },
-  restaurant:   { emoji: '🍽️', bg: '#FDECE6' },
-  fast_food:    { emoji: '🍔', bg: '#FBEFE0' },
-  bar:          { emoji: '🍸', bg: '#EAECF0' },
-};
 
 export function SavedRestaurantCard({
   restaurant, distance, showWantChip = true,
@@ -30,21 +15,18 @@ export function SavedRestaurantCard({
   distance?: string | null;
   showWantChip?: boolean;
 }) {
-  const cat = CATEGORY_STYLE[restaurant.category] ?? CATEGORY_STYLE.restaurant;
-
   return (
     <TouchableOpacity
       style={styles.card}
       onPress={() => router.push(`/restaurant/${restaurant.slug ?? restaurant.id}`)}
       activeOpacity={0.9}
     >
-      {restaurant.cover_photo_url ? (
-        <Image source={{ uri: restaurant.cover_photo_url }} style={styles.thumb} contentFit="cover" transition={200} />
-      ) : (
-        <View style={[styles.thumb, styles.thumbFallback, { backgroundColor: cat.bg }]}>
-          <RText style={{ fontSize: 30, lineHeight: 38 }}>{cat.emoji}</RText>
-        </View>
-      )}
+      <CoverImage
+        uri={restaurant.cover_photo_url}
+        category={restaurant.category}
+        emojiSize={26}
+        style={styles.thumb}
+      />
 
       <View style={styles.info}>
         <RText variant="titleLarge" numberOfLines={1}>{restaurant.name}</RText>
@@ -53,12 +35,6 @@ export function SavedRestaurantCard({
           {restaurant.area ?? restaurant.city ? ` · ${restaurant.area ?? restaurant.city}` : ''}
         </Caption>
         <View style={styles.metaRow}>
-          <View style={styles.metaPill}>
-            <RText style={{ fontSize: 11, lineHeight: 15 }}>⭐</RText>
-            <RText variant="labelSmall" color={colors.textSecondary} style={{ marginLeft: 3 }}>
-              {(restaurant.overall_rating ?? 0).toFixed(1)}
-            </RText>
-          </View>
           {distance ? (
             <View style={styles.metaPill}>
               <Ionicons name="navigate" size={11} color={colors.primary} />

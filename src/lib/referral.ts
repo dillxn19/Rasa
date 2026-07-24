@@ -1,26 +1,37 @@
 import { Share } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Linking from 'expo-linking';
 
 const PENDING_REFERRER_KEY = 'rasa_pending_referrer';
 const WEB_BASE = 'https://rasa.my';
 
-/** Public web link that also carries the referral (opens the app if installed). */
-export function buildInviteLink(username: string): string {
-  return `${WEB_BASE}/join?ref=${encodeURIComponent(username)}`;
+/**
+ * Public web link that carries the referral (opens the app if installed).
+ * `ref` accepts a referral code (preferred) or a username — record_referral
+ * resolves either. Falls back to username when a code isn't available yet.
+ */
+export function buildInviteLink(ref: string): string {
+  return `${WEB_BASE}/join?ref=${encodeURIComponent(ref)}`;
 }
 
-/** Opens the native share sheet with the user's personal invite link. */
-export async function shareInvite(username: string): Promise<void> {
-  const link = buildInviteLink(username);
+/** Opens the native share sheet with the user's personal invite link + code. */
+export async function shareInvite(ref: string): Promise<void> {
+  const link = buildInviteLink(ref);
   const message =
     `Come eat with me on Rasa 🍜 — Malaysia's food discovery app.\n` +
-    `Follow my reviews and find your next makan:\n${link}`;
+    `Follow my reviews and find your next makan.\n` +
+    `Use my code ${ref.toUpperCase()} or tap:\n${link}`;
   try {
     await Share.share({ message });
   } catch {
     /* dismissed */
   }
+}
+
+/** Copy the referral code to the clipboard. */
+export async function copyReferralCode(code: string): Promise<void> {
+  await Clipboard.setStringAsync(code.toUpperCase());
 }
 
 // ── Pending referrer (captured from a deep link before signup) ──

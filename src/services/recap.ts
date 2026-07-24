@@ -19,8 +19,12 @@ export interface RecapData {
   topRestaurant: RecapTopRestaurant | null;
   topRestaurants: RecapTopRestaurant[];
   topCategory: { key: string; count: number } | null;
+  topCategories: { key: string; count: number }[];
   topArea: string | null;
   cities: string[];
+  cuisinesTried: number;
+  fiveStarCount: number;
+  bestDayCount: number;   // most reviews logged in a single day
   photos: string[];
   coinsEarned: number;
   isEmpty: boolean;
@@ -41,7 +45,7 @@ export async function getMonthlyRecap(userId: string): Promise<RecapData> {
     supabase
       .from('reviews')
       .select(
-        'rating, created_at, photos, restaurant:restaurants!restaurant_id(id,name,slug,cover_photo_url,category,city,area)'
+        'rating, created_at, photos, restaurant:restaurants!restaurant_id(id,name,slug,cover_photo_url,category,city,area,cuisines)'
       )
       .eq('user_id', userId)
       .gte('created_at', monthStart)
@@ -61,8 +65,9 @@ export async function getMonthlyRecap(userId: string): Promise<RecapData> {
     return {
       monthLabel, year,
       totalReviews: 0, avgRating: null, photosShared: 0,
-      topRestaurant: null, topRestaurants: [], topCategory: null, topArea: null,
-      cities: [], photos: [], coinsEarned: 0,
+      topRestaurant: null, topRestaurants: [], topCategory: null, topCategories: [], topArea: null,
+      cities: [], cuisinesTried: 0, fiveStarCount: 0, bestDayCount: 0,
+      photos: [], coinsEarned: 0,
       isEmpty: true,
     };
   }
@@ -96,11 +101,15 @@ export async function getMonthlyRecap(userId: string): Promise<RecapData> {
   }
   const topRestaurant = topRestaurants[0] ?? null;
 
-  // Most-reviewed category + favourite area + all photos (for the collage).
+  // Most-reviewed categories + favourite area + cuisines + photos (collage) +
+  // 5★ count + busiest single day.
   const catCounts = new Map<string, number>();
   const areaCounts = new Map<string, number>();
   const citySet = new Set<string>();
+  const cuisineSet = new Set<string>();
+  const dayCounts = new Map<string, number>();
   const photos: string[] = [];
+  let fiveStarCount = 0;
   for (const r of rows) {
     const cat = r.restaurant?.category;
     if (cat) catCounts.set(cat, (catCounts.get(cat) ?? 0) + 1);
@@ -108,17 +117,24 @@ export async function getMonthlyRecap(userId: string): Promise<RecapData> {
     if (city) citySet.add(city);
     const area = r.restaurant?.area;
     if (area) areaCounts.set(area, (areaCounts.get(area) ?? 0) + 1);
+    if (Array.isArray(r.restaurant?.cuisines)) r.restaurant.cuisines.forEach((c: string) => cuisineSet.add(c));
     if (Array.isArray(r.photos)) photos.push(...r.photos);
+    if ((r.rating ?? 0) >= 5) fiveStarCount += 1;
+    const day = (r.created_at ?? '').slice(0, 10);
+    if (day) dayCounts.set(day, (dayCounts.get(day) ?? 0) + 1);
   }
-  let topCategory: { key: string; count: number } | null = null;
-  for (const [key, count] of catCounts) {
-    if (!topCategory || count > topCategory.count) topCategory = { key, count };
-  }
+
+  const topCategories = [...catCounts.entries()]
+    .map(([key, count]) => ({ key, count }))
+    .sort((a, b) => b.count - a.count);
+  const topCategory = topCategories[0] ?? null;
+
   let topArea: string | null = null;
   let topAreaCount = 0;
   for (const [area, count] of areaCounts) {
     if (count > topAreaCount) { topArea = area; topAreaCount = count; }
   }
+  const bestDayCount = Math.max(0, ...dayCounts.values());
 
   const coinsEarned = (coinRows ?? []).reduce(
     (sum: number, r: any) => sum + (r.amount ?? 0),
@@ -133,8 +149,12 @@ export async function getMonthlyRecap(userId: string): Promise<RecapData> {
     topRestaurant,
     topRestaurants,
     topCategory,
+    topCategories,
     topArea,
     cities: Array.from(citySet),
+    cuisinesTried: cuisineSet.size,
+    fiveStarCount,
+    bestDayCount,
     photos,
     coinsEarned,
     isEmpty: false,

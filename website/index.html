@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rasa — Malaysia's social food app. Join the waitlist.</title>
+  <meta name="description" content="Rasa is Malaysia's social food discovery app. Rank every meal, follow friends' taste, and find the best hawker, mamak, kopitiam and cafés near you. Join the waitlist." />
+
+  <!-- Open Graph / social share -->
+  <meta property="og:title" content="Rasa — Malaysia's social food app" />
+  <meta property="og:description" content="Rank every meal. Follow taste, not ads. Discover the best food in Malaysia. Join the waitlist." />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="og-image.png" />
+  <meta name="theme-color" content="#D94841" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- ── Nav ───────────────────────────────────────────── -->
+  <header class="nav">
+    <a class="brand" href="#top">
+      <span class="brand-dot">🍜</span>
+      <span class="brand-word">Rasa</span>
+    </a>
+    <nav class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#jobs">Jobs</a>
+      <a href="#waitlist" class="btn btn-sm">Join waitlist</a>
+    </nav>
+  </header>
+
+  <!-- ── Hero ──────────────────────────────────────────── -->
+  <main id="top">
+    <section class="hero" id="waitlist">
+      <div class="hero-copy">
+        <span class="pill">🇲🇾 Built for Malaysia · Now in private beta</span>
+        <h1>Makan like<br />you mean it.</h1>
+        <p class="lede">
+          Rasa is the social food app for Malaysia. Rank every place you eat,
+          follow friends with taste, and discover the best hawker, mamak,
+          kopitiam and cafés near you — no noisy ratings, no ads.
+        </p>
+
+        <!-- ── Waitlist form ── -->
+        <form id="waitlist-form" class="waitlist" novalidate>
+          <div class="field-row">
+            <input type="text" name="name" placeholder="Your name" autocomplete="name" required />
+            <input type="email" name="email" placeholder="Email" autocomplete="email" required />
+          </div>
+          <div class="field-row">
+            <input type="tel" name="phone" placeholder="Phone (optional)" autocomplete="tel" />
+            <input type="text" name="referral" placeholder="Referral code (optional)" maxlength="12" />
+          </div>
+          <button type="submit" class="btn btn-block">Get early access →</button>
+          <p class="form-note" id="form-note">Be first in line. We'll text or email your invite.</p>
+        </form>
+
+        <div class="social-proof">
+          <div class="avatars">
+            <span class="ava" style="background:#D94841">A</span>
+            <span class="ava" style="background:#F4B942">J</span>
+            <span class="ava" style="background:#4F8A5B">M</span>
+            <span class="ava" style="background:#6D28D9">S</span>
+          </div>
+          <span>Join food lovers across KL, PJ &amp; beyond on the list.</span>
+        </div>
+      </div>
+
+      <!-- Phone mockup -->
+      <div class="hero-art" aria-hidden="true">
+        <div class="phone">
+          <div class="phone-notch"></div>
+          <div class="phone-screen">
+            <div class="app-head">
+              <span class="app-brand">🍜 Rasa</span>
+              <span class="app-city">Kuala Lumpur ▾</span>
+            </div>
+            <div class="card">
+              <div class="card-photo" style="background:linear-gradient(135deg,#F59E0B,#B45309)">🍜</div>
+              <div class="card-body">
+                <strong>Village Park Nasi Lemak</strong>
+                <span>Hawker · Damansara · $</span>
+                <div class="chips"><i class="chip">📍 1.2 km</i><i class="chip green">HALAL</i></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-photo" style="background:linear-gradient(135deg,#8B5CF6,#5B21B6)">☕</div>
+              <div class="card-body">
+                <strong>VCR Café</strong>
+                <span>Café · Bukit Bintang · $$</span>
+                <div class="chips"><i class="chip">📍 2.4 km</i><i class="chip gold">must try</i></div>
+              </div>
+            </div>
+            <div class="app-tabs">
+              <span>🏠</span><span>🔍</span><span class="mid">＋</span><span>🏆</span><span>👤</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Value strip ─────────────────────────────────── -->
+    <section class="strip">
+      <span>Hawker</span><i>·</i><span>Mamak</span><i>·</i><span>Kopitiam</span><i>·</i>
+      <span>Café</span><i>·</i><span>Fine Dining</span><i>·</i><span>Night Market</span>
+    </section>
+
+    <!-- ── Features ────────────────────────────────────── -->
+    <section class="section" id="features">
+      <h2>A food app that actually gets Malaysia.</h2>
+      <div class="grid">
+        <article class="feature">
+          <div class="f-icon">⭐</div>
+          <h3>Rank, don't just rate</h3>
+          <p>Compare each place to spots you've been. Build your personal ranking of everywhere you've eaten — addictive and honest.</p>
+        </article>
+        <article class="feature">
+          <div class="f-icon">👥</div>
+          <h3>Follow taste, not ads</h3>
+          <p>Your feed is what your friends and food-twins are loving. See taste-match % with anyone.</p>
+        </article>
+        <article class="feature">
+          <div class="f-icon">📍</div>
+          <h3>Discover near you</h3>
+          <p>Browse by dish or category, sorted by <em>Near Me</em> or <em>Top Rated</em>. Recommendations tuned to your taste.</p>
+        </article>
+        <article class="feature">
+          <div class="f-icon">🕌</div>
+          <h3>Halal-first</h3>
+          <p>Clear Halal &amp; Muslim-friendly indicators everywhere. Built for how Malaysia really eats.</p>
+        </article>
+        <article class="feature">
+          <div class="f-icon">✨</div>
+          <h3>Your food story</h3>
+          <p>A shareable monthly recap of your top spots and stats — Wrapped, but for makan.</p>
+        </article>
+        <article class="feature">
+          <div class="f-icon">🏆</div>
+          <h3>Campus leaderboards</h3>
+          <p>Climb the ranks in your city and your university. Bragging rights included.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- ── How it works ────────────────────────────────── -->
+    <section class="section how" id="how">
+      <h2>Three taps to your next great meal.</h2>
+      <div class="steps">
+        <div class="step"><span class="s-num">1</span><h3>Rank what you eat</h3><p>Every meal becomes part of your taste profile.</p></div>
+        <div class="step"><span class="s-num">2</span><h3>Follow food lovers</h3><p>Fill your feed with people whose taste you trust.</p></div>
+        <div class="step"><span class="s-num">3</span><h3>Discover &amp; go</h3><p>Get spot-on picks near you, ranked by people like you.</p></div>
+      </div>
+    </section>
+
+    <!-- ── Final CTA ───────────────────────────────────── -->
+    <section class="cta" id="join">
+      <h2>Be first to eat with Rasa.</h2>
+      <p>We're rolling out invites in waves across the Klang Valley. Get on the list.</p>
+      <a href="#waitlist" class="btn cta-btn">Join the waitlist ↑</a>
+    </section>
+  </main>
+
+    <!-- ── Jobs ────────────────────────────────────────── -->
+    <section class="section jobs" id="jobs">
+      <span class="pill dark">🚀 We're hiring</span>
+      <h2>Help us make Malaysia's food app blow up.</h2>
+      <p class="jobs-intro">
+        We're building Rasa in public — and we want food-obsessed students and
+        creators to grow it with us. Two paid roles, based around the Klang Valley
+        (remote-friendly). No corporate experience needed, just taste and hustle.
+      </p>
+
+      <div class="job-grid">
+        <!-- Role 1 — Content -->
+        <article class="job">
+          <div class="job-head">
+            <h3>Content Creator Intern</h3>
+            <span class="job-tags">Part-time · Paid · KL / Remote</span>
+          </div>
+          <p class="job-about">
+            You live on TikTok and Instagram and can turn a plate of char kway teow
+            into a scroll-stopping video. As our Content Creator Intern you'll shoot
+            and edit the organic content that introduces Rasa to Malaysia — food
+            carousels, short-form videos and "best spots" series that people save
+            and share.
+          </p>
+          <h4>What you'll do</h4>
+          <ul>
+            <li>Produce 3–5 short-form videos &amp; carousels a week (film, edit, caption)</li>
+            <li>Cover local food spots — hawker stalls, cafés, mamak, hidden gems</li>
+            <li>Jump on trending audio and formats fast</li>
+            <li>Work with the founders on content themes and the posting calendar</li>
+          </ul>
+          <h4>What we're looking for</h4>
+          <ul>
+            <li>A portfolio or personal account showing you can make content people watch</li>
+            <li>Comfortable on camera <em>or</em> behind it (faceless content is welcome)</li>
+            <li>Genuinely into Malaysian food and social trends</li>
+            <li>Reliable, self-starting, and quick to ship</li>
+          </ul>
+          <h4>What you get</h4>
+          <ul>
+            <li><strong>Paid once your content hits impression milestones</strong> — starts as an unpaid, portfolio-building role and converts to paid as your posts perform</li>
+            <li>Feature credit + real portfolio material you can show off</li>
+            <li>Full creative ownership of Rasa's social presence</li>
+            <li>A front-row seat building a startup from zero</li>
+          </ul>
+          <button type="button" class="btn btn-block apply-btn" data-role="Content Creator Intern" data-fields="content">Apply now</button>
+        </article>
+
+        <!-- Role 2 — Campus Ambassador -->
+        <article class="job">
+          <div class="job-head">
+            <h3>Campus Ambassador</h3>
+            <span class="job-tags">Flexible · Paid · Your campus</span>
+          </div>
+          <p class="job-about">
+            You're the person whose food recs everyone already trusts. As a Campus
+            Ambassador you'll bring Rasa to your university — spreading the word,
+            sharing your referral code, and getting your friends ranking their
+            favourite spots. Paid on results, with room to grow as we scale campus
+            by campus.
+          </p>
+          <h4>What you'll do</h4>
+          <ul>
+            <li>Represent Rasa on your campus and in your circles</li>
+            <li>Share your unique referral code and invite friends to the app</li>
+            <li>Help early users get started and rank their first few places</li>
+            <li>Feed real student feedback back to the team</li>
+          </ul>
+          <h4>What we're looking for</h4>
+          <ul>
+            <li>Currently at a Klang Valley university (or nearby)</li>
+            <li>Social, well-connected, and trusted for your food takes</li>
+            <li>Active on WhatsApp / Instagram / Telegram campus groups</li>
+            <li>Motivated by hitting goals — this role rewards activation</li>
+          </ul>
+          <h4>What you get</h4>
+          <ul>
+            <li><strong>Paid</strong> per activation — the more friends you get eating on Rasa, the more you earn</li>
+            <li>First access to new features and drops</li>
+            <li>Ambassador-only perks</li>
+            <li>A résumé-worthy growth-marketing role at an early-stage startup</li>
+          </ul>
+          <button type="button" class="btn btn-block apply-btn" data-role="Campus Ambassador" data-fields="campus">Apply now</button>
+        </article>
+      </div>
+    </section>
+
+  <!-- ── Footer ──────────────────────────────────────── -->
+  <footer class="footer">
+    <div class="foot-brand"><span>🍜</span> Rasa</div>
+    <div class="foot-links">
+      <a href="https://instagram.com/" target="_blank" rel="noopener">Instagram</a>
+      <a href="https://tiktok.com/" target="_blank" rel="noopener">TikTok</a>
+      <a href="mailto:hello@rasamalaysia.org">Contact</a>
+    </div>
+    <div class="foot-copy">© <span id="year"></span> Rasa · Made in Malaysia</div>
+  </footer>
+
+  <!-- ── Job application modal ───────────────────────── -->
+  <div class="modal-overlay" id="apply-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="apply-title">
+      <button class="modal-close" id="apply-close" aria-label="Close">✕</button>
+      <h3 id="apply-title">Apply</h3>
+      <p class="modal-sub" id="apply-sub">Tell us about you — we read every application.</p>
+      <form id="apply-form" novalidate>
+        <input type="hidden" name="role" id="apply-role" />
+        <input type="text" name="name" placeholder="Full name" autocomplete="name" required />
+        <input type="email" name="email" placeholder="Email" autocomplete="email" required />
+        <input type="text" name="instagram" placeholder="Instagram handle (e.g. @yourname)" required />
+        <input type="text" name="tiktok" placeholder="TikTok handle (optional)" />
+        <input type="text" name="university" id="apply-university" placeholder="University / campus" />
+        <input type="url" name="portfolio" id="apply-portfolio" placeholder="Link to your content or portfolio" />
+        <textarea name="message" rows="3" placeholder="Why you? (a sentence or two)"></textarea>
+        <button type="submit" class="btn btn-block">Submit application</button>
+        <p class="form-note" id="apply-note"></p>
+      </form>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

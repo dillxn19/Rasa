@@ -74,10 +74,6 @@ export function DishRankingRow({ entry, rank, showSignature = true }: DishRankin
         </Caption>
 
         <View style={styles.metaRow}>
-          <StarRating value={entry.average_rating} size={11} readonly compact />
-          <Caption color={colors.textTertiary} style={{ marginLeft: spacing[2] }}>
-            {entry.rating_count} ratings
-          </Caption>
           {entry.local_name && entry.local_name !== '' && (
             <Caption color={colors.textTertiary} style={{ marginLeft: spacing[2] }}>
               · {entry.local_name}

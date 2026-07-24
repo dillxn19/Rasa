@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
@@ -46,6 +46,7 @@ const SLIDE_GRADIENTS: [string, string][] = [
 export default function RecapScreen() {
   const { profile } = useAuthStore();
   const { isUnlocked } = useFeatureAccess();
+  const insets = useSafeAreaInsets();
   const [index, setIndex] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
   const slideRefs = useRef<Array<View | null>>([]);
@@ -57,11 +58,11 @@ export default function RecapScreen() {
     staleTime: 1000 * 60 * 5,
   });
 
-  // NOTE: recap is OPEN for now (preview). Re-enable the 1-referral gate before
-  // launch by uncommenting below.
-  // if (!isUnlocked('monthly_recap')) {
-  //   return <LockedRecap onInvite={() => profile?.username && shareInvite(profile.username)} />;
-  // }
+  // Recap unlocks once you've ranked 10 places (enough of a food story to be fun).
+  const placesRanked = profile?.total_reviews ?? 0;
+  if (placesRanked < 10) {
+    return <RecapLocked remaining={10 - placesRanked} />;
+  }
 
   if (isLoading || !recap) {
     return (
@@ -142,9 +143,14 @@ export default function RecapScreen() {
     }
   };
 
+  // Inset the whole story from the device edges so the notch/camera never
+  // covers a slide (the user wanted it "a bit smaller than the screen").
+  const topPad = Math.max(insets.top, 12);
+  const bottomPad = Math.max(insets.bottom, 12);
+
   return (
     <View style={styles.container}>
-      <StatusBar hidden />
+      <StatusBar style="light" />
       <ScrollView
         ref={scrollRef}
         horizontal
@@ -160,7 +166,7 @@ export default function RecapScreen() {
             collapsable={false}
             ref={(el) => { slideRefs.current[i] = el; }}
           >
-            <Slide gradient={SLIDE_GRADIENTS[i % SLIDE_GRADIENTS.length]}>
+            <Slide gradient={SLIDE_GRADIENTS[i % SLIDE_GRADIENTS.length]} handle={profile?.username ?? undefined}>
               {slide}
             </Slide>
           </View>
@@ -174,7 +180,7 @@ export default function RecapScreen() {
       </View>
 
       {/* Top bar: progress dots + share + close */}
-      <SafeAreaView edges={['top']} style={styles.topBar} pointerEvents="box-none">
+      <View style={[styles.topBar, { paddingTop: topPad + spacing[2] }]} pointerEvents="box-none">
         <View style={styles.dots}>
           {slides.map((_, i) => (
             <View key={i} style={[styles.dot, i === index && styles.dotActive]} />
@@ -189,10 +195,10 @@ export default function RecapScreen() {
         <TouchableOpacity style={styles.topBarBtn} onPress={() => router.back()} hitSlop={10}>
           <Ionicons name="close" size={22} color={colors.white} />
         </TouchableOpacity>
-      </SafeAreaView>
+      </View>
 
       {/* Bottom action */}
-      <SafeAreaView edges={['bottom']} style={styles.bottomBar} pointerEvents="box-none">
+      <View style={[styles.bottomBar, { paddingBottom: bottomPad + spacing[4] }]} pointerEvents="box-none">
         {index < slides.length - 1 ? (
           <TouchableOpacity style={styles.nextBtn} onPress={goNext} activeOpacity={0.85}>
             <Ionicons name="arrow-forward" size={22} color={colors.textPrimary} />
@@ -205,17 +211,24 @@ export default function RecapScreen() {
             </RText>
           </TouchableOpacity>
         )}
-      </SafeAreaView>
+      </View>
     </View>
   );
 }
 
 // ─── Slide shell ──────────────────────────────────────────────
 
-function Slide({ gradient, children }: { gradient: [string, string]; children: React.ReactNode }) {
+function Slide({ gradient, handle, children }: { gradient: [string, string]; handle?: string; children: React.ReactNode }) {
   return (
     <LinearGradient colors={gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.slide}>
-      <SafeAreaView style={styles.slideSafe}>{children}</SafeAreaView>
+      <View style={styles.slideSafe}>{children}</View>
+      {/* Brand watermark — captured into every shared/saved image so each slide
+          is instantly recognisable as Rasa (organic attribution, Wrapped-style). */}
+      <View style={styles.brandMark} pointerEvents="none">
+        <RText style={styles.brandDot}>🍜</RText>
+        <RText style={styles.brandWord}>Rasa</RText>
+        {handle ? <RText style={styles.brandHandle}>@{handle}</RText> : null}
+      </View>
     </LinearGradient>
   );
 }
@@ -310,18 +323,25 @@ function buildSlides(recap: RecapData, handle?: string): React.ReactNode[] {
     );
   }
 
-  // 3b — Top spots (mini ranking, very shareable)
+  // 3b — Top spots (Spotify-style top-5 with album-art thumbnails)
   if (recap.topRestaurants.length > 1) {
     slides.push(
       <View style={styles.slideContent} key="topspots">
         <Animated.View entering={FadeInDown.duration(500)} style={{ width: '100%' }}>
-          <RText style={styles.kicker}>YOUR TOP SPOTS</RText>
+          <RText style={styles.kicker}>YOUR TOP 5 SPOTS</RText>
           <View style={{ marginTop: spacing[5], gap: spacing[3] }}>
             {recap.topRestaurants.map((r, i) => (
               <View key={r.id} style={styles.topSpotRow}>
                 <RText style={styles.topSpotRank}>{i + 1}</RText>
+                {r.cover_photo_url ? (
+                  <Image source={{ uri: r.cover_photo_url }} style={styles.topSpotThumb} contentFit="cover" transition={200} />
+                ) : (
+                  <View style={[styles.topSpotThumb, styles.topSpotThumbFallback]}>
+                    <RText style={{ fontSize: 24, lineHeight: 30 }}>{CATEGORY_EMOJI[r.category ?? 'restaurant'] ?? '🍽️'}</RText>
+                  </View>
+                )}
                 <View style={{ flex: 1, marginHorizontal: spacing[3] }}>
-                  <RText variant="titleLarge" color={colors.white} numberOfLines={1}>{r.name}</RText>
+                  <RText variant="titleMedium" color={colors.white} numberOfLines={1}>{r.name}</RText>
                   {r.city ? <Caption color={colors.whiteTransparent80} numberOfLines={1}>{r.city}</Caption> : null}
                 </View>
                 <View style={[styles.topSpotScore, { backgroundColor: scoreColor(r.rating) }]}>
@@ -336,6 +356,28 @@ function buildSlides(recap: RecapData, handle?: string): React.ReactNode[] {
       </View>
     );
   }
+
+  // 3c — By the numbers (rich stat grid so the recap isn't plain)
+  slides.push(
+    <View style={styles.slideContent} key="numbers">
+      <Animated.View entering={FadeInDown.duration(500)} style={{ width: '100%' }}>
+        <RText style={styles.kicker}>BY THE NUMBERS</RText>
+        <View style={styles.numbersGrid}>
+          <NumberStat value={String(recap.totalReviews)} label={recap.totalReviews === 1 ? 'place rated' : 'places rated'} />
+          <NumberStat value={recap.avgRating != null ? recap.avgRating.toFixed(1) : '—'} label="avg rating" />
+          <NumberStat value={String(recap.photosShared)} label={recap.photosShared === 1 ? 'photo' : 'photos'} />
+          <NumberStat value={String(recap.cuisinesTried)} label={recap.cuisinesTried === 1 ? 'cuisine' : 'cuisines'} />
+          <NumberStat value={String(recap.fiveStarCount)} label="5★ meals" />
+          <NumberStat value={String(recap.cities.length)} label={recap.cities.length === 1 ? 'city' : 'cities'} />
+        </View>
+        {recap.bestDayCount > 1 && (
+          <Caption color={colors.whiteTransparent80} align="center" style={{ marginTop: spacing[5] }}>
+            🔥 Your busiest day: {recap.bestDayCount} places in one day
+          </Caption>
+        )}
+      </Animated.View>
+    </View>
+  );
 
   // 4 — Favorite category
   if (recap.topCategory) {
@@ -430,9 +472,6 @@ function buildSlides(recap: RecapData, handle?: string): React.ReactNode[] {
           )}
           <RText style={styles.summaryHandle}>{handle ? `@${handle}` : 'me'} · rasa.my</RText>
         </View>
-        <Caption color={colors.whiteTransparent90} style={{ marginTop: spacing[4] }}>
-          Save or share this card ↓
-        </Caption>
       </Animated.View>
     </View>
   );
@@ -440,7 +479,9 @@ function buildSlides(recap: RecapData, handle?: string): React.ReactNode[] {
   return slides;
 }
 
-// Faint 3×3 collage of the month's photos, used behind the summary card.
+// Vivid full-bleed 3×3 collage of the month's photos behind the summary card.
+// Photos stay fully visible — only a soft edge vignette keeps the top/bottom
+// chrome legible; the card itself provides its own contrast.
 function SummaryCollage({ photos }: { photos: string[] }) {
   const grid = photos.slice(0, 9);
   return (
@@ -450,7 +491,11 @@ function SummaryCollage({ photos }: { photos: string[] }) {
           <Image key={i} source={{ uri: p }} style={styles.collageCell} contentFit="cover" />
         ))}
       </View>
-      <View style={styles.collageScrim} />
+      <LinearGradient
+        colors={['rgba(0,0,0,0.35)', 'transparent', 'transparent', 'rgba(0,0,0,0.35)']}
+        locations={[0, 0.22, 0.78, 1]}
+        style={StyleSheet.absoluteFill as any}
+      />
     </View>
   );
 }
@@ -464,7 +509,49 @@ function SummaryStat({ value, label }: { value: string; label: string }) {
   );
 }
 
+function NumberStat({ value, label }: { value: string; label: string }) {
+  return (
+    <View style={styles.numberStat}>
+      <RText style={styles.numberStatValue}>{value}</RText>
+      <RText style={styles.numberStatLabel}>{label}</RText>
+    </View>
+  );
+}
+
 // Shown when the recap isn't unlocked yet (1 referral or coins).
+// Locked until the user has ranked enough places to have a real food story.
+function RecapLocked({ remaining }: { remaining: number }) {
+  return (
+    <LinearGradient colors={['#6D28D9', '#3B1D8F']} style={[styles.container, styles.center]}>
+      <StatusBar hidden />
+      <SafeAreaView style={[styles.center, { padding: spacing[8] }]}>
+        <View style={styles.lockBadge}>
+          <RText style={{ fontSize: 34, lineHeight: 42 }}>🔒</RText>
+        </View>
+        <RText variant="h2" color={colors.white} align="center" style={{ marginTop: spacing[5] }}>
+          Your food story is loading
+        </RText>
+        <Caption color={colors.whiteTransparent90} align="center" style={{ marginTop: spacing[3], maxWidth: 300, lineHeight: 20 }}>
+          Rank {remaining} more {remaining === 1 ? 'place' : 'places'} to unlock your recap — a shareable “food wrapped” of your top spots, cuisines and stats.
+        </Caption>
+        <TouchableOpacity
+          style={styles.lockBtn}
+          onPress={() => { router.back(); router.push('/(tabs)/add'); }}
+          activeOpacity={0.9}
+        >
+          <Ionicons name="add" size={18} color={colors.primary} />
+          <RText variant="buttonMedium" color={colors.primary} style={{ marginLeft: spacing[2] }}>
+            Rank a place
+          </RText>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => router.back()} style={{ marginTop: spacing[4] }}>
+          <RText variant="labelMedium" color={colors.whiteTransparent80}>Maybe later</RText>
+        </TouchableOpacity>
+      </SafeAreaView>
+    </LinearGradient>
+  );
+}
+
 function LockedRecap({ onInvite }: { onInvite: () => void }) {
   return (
     <LinearGradient colors={['#6D28D9', '#3B1D8F']} style={[styles.container, styles.center]}>
@@ -529,24 +616,37 @@ const styles = StyleSheet.create({
   slide: { width: SCREEN_WIDTH, flex: 1 },
   slideSafe: { flex: 1 },
 
+  // Brand watermark (captured into every shared image)
+  brandMark: {
+    position: 'absolute',
+    bottom: spacing[6],
+    left: spacing[6],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[1],
+    opacity: 0.9,
+  },
+  brandDot: { fontSize: 13, lineHeight: 17 },
+  brandWord: { fontSize: 15, fontWeight: '900', color: colors.white, letterSpacing: 1 },
+  brandHandle: { fontSize: 12, color: 'rgba(255,255,255,0.65)', marginLeft: spacing[1] },
+
   // Tap zones (edges navigate; middle stays free for swipe & content taps)
   tapLeft: { position: 'absolute', left: 0, top: 96, bottom: 104, width: '26%' },
   tapRight: { position: 'absolute', right: 0, top: 96, bottom: 104, width: '26%' },
 
-  // Summary collage
-  collage: { ...StyleSheet.absoluteFillObject, opacity: 0.5 },
+  // Summary collage — photos fully visible (no flat colour overlay)
+  collage: { ...StyleSheet.absoluteFillObject },
   collageGrid: { flex: 1, flexDirection: 'row', flexWrap: 'wrap' },
   collageCell: { width: '33.34%', height: '33.34%' },
-  collageScrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)' },
 
-  // Summary (final) card
+  // Summary (final) card — dark glass so text stays readable over vivid photos
   summaryCard: {
     width: '100%',
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(15,10,10,0.62)',
     borderRadius: radius['2xl'],
     padding: spacing[5],
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+    borderColor: 'rgba(255,255,255,0.28)',
     marginTop: spacing[4],
   },
   summaryBrand: { color: colors.white, fontSize: 20, fontWeight: '800', marginBottom: spacing[4] },
@@ -576,9 +676,17 @@ const styles = StyleSheet.create({
 
   // Top spots
   topSpotRow: { flexDirection: 'row', alignItems: 'center' },
-  topSpotRank: { fontSize: 22, fontWeight: '900', color: colors.whiteTransparent80, width: 24, textAlign: 'center' },
+  topSpotRank: { fontSize: 22, fontWeight: '900', color: colors.whiteTransparent80, width: 22, textAlign: 'center' },
+  topSpotThumb: { width: 52, height: 52, borderRadius: radius.lg, marginLeft: spacing[2], backgroundColor: 'rgba(255,255,255,0.15)' },
+  topSpotThumbFallback: { alignItems: 'center', justifyContent: 'center' },
   topSpotScore: { minWidth: 44, height: 44, borderRadius: radius.lg, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing[2] },
   topSpotScoreText: { color: colors.white, fontSize: 18, fontWeight: '800' },
+
+  // By-the-numbers grid
+  numbersGrid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing[4] },
+  numberStat: { width: '33.34%', alignItems: 'center', marginVertical: spacing[3] },
+  numberStatValue: { color: colors.white, fontSize: 40, lineHeight: 44, fontWeight: '900', letterSpacing: -1.5 },
+  numberStatLabel: { color: colors.whiteTransparent80, fontSize: 12, marginTop: 2, textAlign: 'center' },
   slideContent: {
     flex: 1,
     alignItems: 'center',

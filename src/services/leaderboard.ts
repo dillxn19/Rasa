@@ -85,15 +85,33 @@ export async function getFriendsLeaderboard(
     }));
 }
 
+/** Campus leaderboard — same shape as city, filtered to one school. */
+export async function getSchoolLeaderboard(
+  school: string,
+  period: LeaderboardPeriod,
+  limit = 20,
+): Promise<LeaderboardEntry[]> {
+  return leaderboardBy('school', school, period, limit);
+}
+
 export async function getLeaderboard(
   city: string,
   period: LeaderboardPeriod,
   limit = 20,
 ): Promise<LeaderboardEntry[]> {
+  return leaderboardBy('city', city, period, limit);
+}
+
+async function leaderboardBy(
+  column: 'city' | 'school',
+  value: string,
+  period: LeaderboardPeriod,
+  limit: number,
+): Promise<LeaderboardEntry[]> {
   const { data: cityUsers } = await supabase
     .from('users')
     .select('id, username, display_name, avatar_url, city, total_reviews, taste_profile')
-    .eq('city', city)
+    .eq(column, value)
     .eq('is_active', true)
     .gt('total_reviews', 0);
 

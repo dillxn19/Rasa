@@ -23,6 +23,7 @@ const NOTIFICATION_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   badge_earned: 'ribbon',
   recommendation: 'star',
   friend_review: 'restaurant',
+  milestone: 'gift',
 };
 
 export default function ActivityScreen() {

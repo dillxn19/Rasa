@@ -19,21 +19,25 @@ import { RText, H2, H3, H4, Body, Caption } from '@/components/ui/Text';
 import { Avatar } from '@/components/ui/Avatar';
 import { StarRating } from '@/components/ui/StarRating';
 import { Button } from '@/components/ui/Button';
+import { CoverImage } from '@/components/restaurants/CoverImage';
 import { useAuthStore, selectCurrentUserId } from '@/stores/authStore';
 import {
-  getRestaurantByIdOrSlug, getRestaurantReviews, getRestaurantPhotos,
+  getRestaurantByIdOrSlug, getRestaurantReviews, getRestaurantPhotos, getCommunityPhotos,
   getPopularDishes, getFriendReviews, saveRestaurant, unsaveRestaurant,
-  getFollowersWhoSaved, getRestaurantRatingDistribution,
+  getFollowersWhoSaved, getRestaurantRatingDistribution, deleteReviewForRestaurant,
 } from '@/services/restaurants';
-import { getRestaurantFoodTags, toggleFoodTag } from '@/services/dishes';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { getRestaurantFoodTags, toggleFoodTag, MIN_TAGS_TO_SURFACE } from '@/services/dishes';
 import { useReviewedRestaurantIds } from '@/hooks/useReviewedRestaurants';
 import { getUserCoins } from '@/services/coins';
+import { SaveToListSheet } from '@/components/lists/SaveToListSheet';
+import { PhotoViewerModal } from '@/components/restaurants/PhotoViewerModal';
 import { useFeatureAccess, unlockWithCoins, FEATURES, type FeatureDef } from '@/services/features';
 import { shareInvite } from '@/lib/referral';
 import { FeatureGateModal } from '@/components/ui/FeatureGateModal';
 import { FoodTagList } from '@/components/ui/FoodTag';
 import { toast } from '@/stores/toastStore';
-import { queryKeys } from '@/lib/queryClient';
+import { queryKeys, invalidateAfterReview } from '@/lib/queryClient';
 import type { Review } from '@/types';
 import { CATEGORY_LABELS, DIETARY_LABELS, PRICE_LABELS, type FoodTagType } from '@/types';
 import { shareRestaurant, shareViaWhatsApp, getWazeUrl } from '@/lib/share';
@@ -50,6 +54,9 @@ export default function RestaurantScreen() {
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
   const { isUnlocked, referralCount } = useFeatureAccess();
   const [gate, setGate] = useState<FeatureDef | null>(null);
+  const [showSaveToList, setShowSaveToList] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const [showDeleteReview, setShowDeleteReview] = useState(false);
   const friendsUnlocked = isUnlocked('friends_ratings');
   const whoSavedUnlocked = isUnlocked('who_saved');
   const storeAvgUnlocked = isUnlocked('store_averages');
@@ -110,6 +117,12 @@ export default function RestaurantScreen() {
     enabled: !!rid && !!profile,
   });
 
+  const { data: communityPhotos } = useQuery({
+    queryKey: ['restaurant-photos', rid],
+    queryFn: () => getCommunityPhotos(rid),
+    enabled: !!rid,
+  });
+
   const { data: foodTags } = useQuery({
     queryKey: ['restaurant-tags', rid, userId],
     queryFn: () => getRestaurantFoodTags(rid, userId),
@@ -158,7 +171,31 @@ export default function RestaurantScreen() {
     },
   });
 
+  const deleteReviewMutation = useMutation({
+    mutationFn: () => deleteReviewForRestaurant(profile!.id, rid),
+    onSuccess: () => {
+      setShowDeleteReview(false);
+      invalidateAfterReview(qc, profile!.id, rid);
+      qc.invalidateQueries({ queryKey: queryKeys.restaurant(id) });
+      toast.success('Review deleted');
+    },
+    onError: () => { setShowDeleteReview(false); toast.error('Could not delete your review.'); },
+  });
+
   const openStatus = restaurant ? getOpenStatus(restaurant.opening_hours) : null;
+
+  const handleRate = () => {
+    if (!restaurant) return;
+    router.push({
+      pathname: '/(tabs)/add',
+      params: {
+        restaurantId: rid,
+        restaurantName: restaurant.name,
+        restaurantCategory: restaurant.category,
+        restaurantCity: restaurant.city ?? '',
+      },
+    } as any);
+  };
 
   const handleShare = async () => {
     if (!restaurant) return;
@@ -233,9 +270,7 @@ export default function RestaurantScreen() {
                 transition={200}
               />
             )) : (
-              <View style={[styles.heroPhoto, styles.heroPlaceholder]}>
-                <Ionicons name="restaurant-outline" size={64} color={colors.gray300} />
-              </View>
+              <CoverImage category={restaurant.category} emojiSize={72} style={styles.heroPhoto} transition={0} />
             )}
           </ScrollView>
 
@@ -266,10 +301,10 @@ export default function RestaurantScreen() {
                 <Ionicons name="share-outline" size={22} color={colors.white} />
               </TouchableOpacity>
               {hasVisited ? (
-                // Already rated → show a "been" checkmark instead of the bookmark.
-                <View style={styles.navBtn}>
+                // Already rated → checkmark; tap to delete your review.
+                <TouchableOpacity style={styles.navBtn} onPress={() => setShowDeleteReview(true)}>
                   <Ionicons name="checkmark-circle" size={22} color={colors.success} />
-                </View>
+                </TouchableOpacity>
               ) : (
                 <TouchableOpacity
                   style={styles.navBtn}
@@ -321,19 +356,18 @@ export default function RestaurantScreen() {
               )}
             </View>
 
-            {/* Rating block — community average is a referral-only perk */}
+            {/* Short description (from Google editorial summary) */}
+            {restaurant.description ? (
+              <Body color={colors.textSecondary} style={{ marginTop: spacing[3], lineHeight: 21 }}>
+                {restaurant.description}
+              </Body>
+            ) : null}
+
+            {/* Rating block. Locked users see an IDENTICAL teaser whether or not
+                the place has ratings (never leak rated-status). Unlocked users see
+                the real average + count, or an honest "no ratings yet". */}
             <View style={styles.ratingBlock}>
-              {storeAvgUnlocked ? (
-                <View style={styles.ratingMain}>
-                  <RText variant="rating" color={colors.textPrimary}>
-                    {restaurant.overall_rating.toFixed(1)}
-                  </RText>
-                  <View style={{ marginLeft: spacing[2] }}>
-                    <StarRating value={restaurant.overall_rating} size={18} readonly />
-                    <Caption>{restaurant.total_reviews.toLocaleString()} reviews</Caption>
-                  </View>
-                </View>
-              ) : (
+              {!storeAvgUnlocked ? (
                 <TouchableOpacity
                   style={styles.ratingLocked}
                   onPress={() => setGate(FEATURES.store_averages)}
@@ -344,9 +378,29 @@ export default function RestaurantScreen() {
                   </View>
                   <View>
                     <RText variant="titleSmall" color={colors.primary}>See community rating</RText>
-                    <Caption color={colors.textSecondary}>
-                      Refer a friend to unlock · {restaurant.total_reviews.toLocaleString()} reviews
+                    <Caption color={colors.textSecondary}>Refer a friend to unlock</Caption>
+                  </View>
+                </TouchableOpacity>
+              ) : restaurant.total_reviews > 0 ? (
+                <View style={styles.ratingMain}>
+                  <RText variant="rating" color={colors.textPrimary}>
+                    {restaurant.overall_rating.toFixed(1)}
+                  </RText>
+                  <View style={{ marginLeft: spacing[2] }}>
+                    <StarRating value={restaurant.overall_rating} size={18} readonly />
+                    <Caption>
+                      {restaurant.total_reviews.toLocaleString()} {restaurant.total_reviews === 1 ? 'rating' : 'ratings'}
                     </Caption>
+                  </View>
+                </View>
+              ) : (
+                <TouchableOpacity style={styles.ratingUnrated} onPress={handleRate} activeOpacity={0.85}>
+                  <View style={styles.ratingLockIcon}>
+                    <Ionicons name="star-outline" size={16} color={colors.primary} />
+                  </View>
+                  <View>
+                    <RText variant="titleSmall" color={colors.textPrimary}>No ratings yet</RText>
+                    <Caption color={colors.textSecondary}>Be the first to review this place</Caption>
                   </View>
                 </TouchableOpacity>
               )}
@@ -419,35 +473,41 @@ export default function RestaurantScreen() {
             </View>
           )}
 
-          {/* Quick actions */}
-          <View style={styles.quickActions}>
-            <TouchableOpacity style={styles.quickAction} onPress={handleDirections}>
-              <RText style={{ fontSize: 20 }}>📍</RText>
-              <RText variant="labelMedium" color={colors.textSecondary}>Maps</RText>
-            </TouchableOpacity>
+          {/* Quick actions — unified circular tinted icons (consistent, premium). */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.quickActions}
+          >
+            <QuickAction icon="navigate" label="Maps" tint="#3B82F6" onPress={handleDirections} />
+            {profile && (
+              <QuickAction icon="bookmark" label="Save" tint={colors.primary} onPress={() => setShowSaveToList(true)} />
+            )}
             {restaurant.phone_number && (
-              <TouchableOpacity
-                style={styles.quickAction}
-                onPress={() => Linking.openURL(`tel:${restaurant.phone_number}`)}
-              >
-                <RText style={{ fontSize: 20 }}>📞</RText>
-                <RText variant="labelMedium" color={colors.textSecondary}>Call</RText>
-              </TouchableOpacity>
+              <QuickAction icon="call" label="Call" tint={colors.success} onPress={() => Linking.openURL(`tel:${restaurant.phone_number}`)} />
             )}
-            <TouchableOpacity style={styles.quickAction} onPress={handleWhatsAppShare}>
-              <RText style={{ fontSize: 20 }}>💬</RText>
-              <RText variant="labelMedium" color={colors.textSecondary}>WhatsApp</RText>
-            </TouchableOpacity>
+            <QuickAction icon="logo-whatsapp" label="WhatsApp" tint="#25D366" onPress={handleWhatsAppShare} />
             {restaurant.website_url && (
-              <TouchableOpacity
-                style={styles.quickAction}
-                onPress={() => Linking.openURL(restaurant.website_url!)}
-              >
-                <RText style={{ fontSize: 20 }}>🌐</RText>
-                <RText variant="labelMedium" color={colors.textSecondary}>Website</RText>
-              </TouchableOpacity>
+              <QuickAction icon="globe-outline" label="Website" tint="#6D28D9" onPress={() => Linking.openURL(restaurant.website_url!)} />
             )}
-          </View>
+          </ScrollView>
+
+          {/* Community photos — every photo diners have posted here */}
+          {(communityPhotos ?? []).length > 0 && (
+            <View style={styles.photosSection}>
+              <View style={styles.sectionHeaderRow}>
+                <H4>Photos</H4>
+                <Caption color={colors.textTertiary}>{communityPhotos!.length} from diners</Caption>
+              </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoStrip}>
+                {(communityPhotos ?? []).map((p, i) => (
+                  <TouchableOpacity key={`${p.reviewId}-${i}`} activeOpacity={0.9} onPress={() => setViewerIndex(i)}>
+                    <Image source={{ uri: p.url }} style={styles.communityPhoto} contentFit="cover" transition={150} />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
 
           {/* Write review CTA */}
           <View style={styles.reviewCTA}>
@@ -501,25 +561,40 @@ export default function RestaurantScreen() {
             )
           )}
 
-          {/* Community food tags */}
-          {(foodTags ?? []).length > 0 && (
-            <View style={styles.tagsSection}>
-              <View style={styles.sectionHeader}>
-                <H4>Community Tags</H4>
-                {userId && (
-                  <TouchableOpacity onPress={() => router.push(`/restaurant/${rid}/tags`)}>
-                    <Caption color={colors.primary}>+ Add tag</Caption>
+          {/* Community food tags — only surface as "community" once enough distinct
+              people agree (MIN_TAGS_TO_SURFACE). Below that, a single person's tag
+              isn't consensus, so we show an invite-to-tag hint instead. The full
+              tag catalogue (incl. the user's own picks) lives on the /tags screen. */}
+          {(() => {
+            const communityTags = (foodTags ?? []).filter(t => t.count >= MIN_TAGS_TO_SURFACE);
+            if (communityTags.length === 0 && !userId) return null;
+            return (
+              <View style={styles.tagsSection}>
+                <View style={styles.sectionHeader}>
+                  <H4>Community Tags</H4>
+                  {userId && (
+                    <TouchableOpacity onPress={() => router.push(`/restaurant/${rid}/tags`)}>
+                      <Caption color={colors.primary}>+ Add tag</Caption>
+                    </TouchableOpacity>
+                  )}
+                </View>
+                {communityTags.length > 0 ? (
+                  <FoodTagList
+                    tags={communityTags}
+                    onToggle={(tag) => tagMutation.mutate(tag)}
+                    editable={!!userId}
+                    maxVisible={8}
+                  />
+                ) : (
+                  <TouchableOpacity onPress={() => router.push(`/restaurant/${rid}/tags`)} activeOpacity={0.7}>
+                    <Caption color={colors.textSecondary}>
+                      No community tags yet — be one of the first to tag this spot.
+                    </Caption>
                   </TouchableOpacity>
                 )}
               </View>
-              <FoodTagList
-                tags={foodTags ?? []}
-                onToggle={(tag) => tagMutation.mutate(tag)}
-                editable={!!userId}
-                maxVisible={8}
-              />
-            </View>
-          )}
+            );
+          })()}
 
           {/* Popular dishes */}
           {dishes && dishes.length > 0 && (
@@ -594,9 +669,58 @@ export default function RestaurantScreen() {
         coins={coins}
         onClose={() => setGate(null)}
         onUnlockWithCoins={handleUnlockWithCoins}
-        onInvite={() => { setGate(null); if (profile?.username) shareInvite(profile.username); }}
+        onInvite={() => { setGate(null); const r = profile?.referral_code ?? profile?.username; if (r) shareInvite(r); }}
       />
+
+      {profile && rid && (
+        <SaveToListSheet
+          visible={showSaveToList}
+          userId={profile.id}
+          restaurantId={rid}
+          restaurantName={restaurant.name}
+          onClose={() => setShowSaveToList(false)}
+        />
+      )}
+
+      <ConfirmDialog
+        visible={showDeleteReview}
+        title="Delete your review?"
+        message="Your rating, text and photos for this place will be removed."
+        confirmLabel="Delete"
+        destructive
+        loading={deleteReviewMutation.isPending}
+        onConfirm={() => deleteReviewMutation.mutate()}
+        onCancel={() => setShowDeleteReview(false)}
+      />
+
+      {viewerIndex != null && (communityPhotos ?? []).length > 0 && (
+        <PhotoViewerModal
+          visible
+          photos={communityPhotos ?? []}
+          initialIndex={viewerIndex}
+          reporterId={profile?.id ?? ''}
+          onClose={() => setViewerIndex(null)}
+        />
+      )}
     </View>
+  );
+}
+
+function QuickAction({
+  icon, label, tint, onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  tint: string;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity style={styles.quickAction} onPress={onPress} activeOpacity={0.8}>
+      <View style={[styles.quickActionIcon, { backgroundColor: tint + '1A' }]}>
+        <Ionicons name={icon} size={22} color={tint} />
+      </View>
+      <RText variant="labelSmall" color={colors.textSecondary} numberOfLines={1}>{label}</RText>
+    </TouchableOpacity>
   );
 }
 
@@ -712,6 +836,16 @@ const styles = StyleSheet.create({
   separator: { width: 3, height: 3, borderRadius: 1.5, backgroundColor: colors.gray300 },
   ratingBlock: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   ratingMain: { flexDirection: 'row', alignItems: 'center' },
+  ratingUnrated: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[3],
+    backgroundColor: colors.gray50,
+    borderRadius: radius.xl,
+    padding: spacing[3],
+    flex: 1,
+    marginRight: spacing[3],
+  },
   ratingLocked: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -768,19 +902,35 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingHorizontal: spacing[4],
     paddingVertical: spacing[4],
-    gap: spacing[3],
+    gap: spacing[4],
+  },
+  quickAction: {
+    alignItems: 'center',
+    gap: spacing[2],
+    width: 60,
+  },
+  quickActionIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photosSection: {
+    paddingTop: spacing[4],
+    paddingBottom: spacing[2],
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
-  quickAction: {
-    flex: 1,
+  sectionHeaderRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing[1],
-    paddingVertical: spacing[3],
-    borderRadius: radius.xl,
-    borderWidth: 1,
-    borderColor: colors.border,
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing[4],
+    marginBottom: spacing[3],
   },
+  photoStrip: { paddingHorizontal: spacing[4], gap: spacing[2] },
+  communityPhoto: { width: 130, height: 160, borderRadius: radius.lg, backgroundColor: colors.gray100 },
   reviewCTA: {
     paddingHorizontal: spacing[4],
     paddingVertical: spacing[4],

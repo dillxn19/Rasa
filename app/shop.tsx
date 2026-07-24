@@ -41,6 +41,11 @@ export default function ShopScreen() {
   if (!profile) return null;
 
   const handleThemePress = async (theme: ThemeDef) => {
+    if (theme.comingSoon) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      toast.info('This theme is coming soon 👀', 'Coming soon');
+      return;
+    }
     if (theme.id === activeTheme || purchasing) return;
     const owned = theme.cost === 0 || coins >= theme.cost;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -131,10 +136,11 @@ export default function ShopScreen() {
             const isActive = theme.id === activeTheme;
             const canAfford = coins >= theme.cost;
             const isBuying = purchasing === theme.id;
+            const isComingSoon = !!theme.comingSoon;
             return (
               <TouchableOpacity
                 key={theme.id}
-                style={[styles.themeCard, isActive && styles.themeCardActive]}
+                style={[styles.themeCard, isActive && styles.themeCardActive, isComingSoon && styles.themeCardComingSoon]}
                 onPress={() => handleThemePress(theme)}
                 activeOpacity={0.85}
                 disabled={isBuying}
@@ -142,8 +148,13 @@ export default function ShopScreen() {
                 <View style={[styles.swatch, { backgroundColor: theme.preview.bg }]}>
                   <View style={[styles.swatchCircle, { backgroundColor: theme.preview.primary }]} />
                   <View style={[styles.swatchLine, { backgroundColor: theme.preview.surface }]} />
-                  <RText style={{ fontSize: 26, lineHeight: 34 }}>{theme.emoji}</RText>
-                  {theme.tier === 'signature' && (
+                  <RText style={{ fontSize: 26, lineHeight: 34, opacity: isComingSoon ? 0.5 : 1 }}>{theme.emoji}</RText>
+                  {isComingSoon ? (
+                    <View style={styles.comingSoonBadge}>
+                      <Ionicons name="lock-closed" size={9} color={colors.white} />
+                      <RText style={styles.signatureBadgeText}>COMING SOON</RText>
+                    </View>
+                  ) : theme.tier === 'signature' && (
                     <View style={styles.signatureBadge}>
                       <Ionicons name="sparkles" size={9} color={colors.white} />
                       <RText style={styles.signatureBadgeText}>SIGNATURE</RText>
@@ -157,7 +168,13 @@ export default function ShopScreen() {
                       Aa · {theme.fontNote}
                     </Caption>
                   )}
-                  {isActive ? (
+                  {isComingSoon ? (
+                    <View style={styles.comingSoonChip}>
+                      <RText style={{ fontSize: 10, color: colors.textTertiary, fontWeight: '800' }}>
+                        COMING SOON
+                      </RText>
+                    </View>
+                  ) : isActive ? (
                     <View style={styles.equippedChip}>
                       <Ionicons name="checkmark" size={12} color={colors.white} />
                       <RText style={{ fontSize: 10, color: colors.white, fontWeight: '800', marginLeft: 2 }}>
@@ -324,6 +341,28 @@ const styles = StyleSheet.create({
     ...(shadows.sm as object),
   },
   themeCardActive: { borderColor: colors.primary },
+  themeCardComingSoon: { opacity: 0.85 },
+  comingSoonBadge: {
+    position: 'absolute',
+    top: spacing[2],
+    right: spacing[2],
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: spacing[2],
+    paddingVertical: 2,
+    borderRadius: radius.full,
+    gap: 2,
+  },
+  comingSoonChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: colors.gray100,
+    borderRadius: radius.full,
+    paddingHorizontal: spacing[2],
+    paddingVertical: 2,
+  },
   swatch: {
     height: 96,
     alignItems: 'center',

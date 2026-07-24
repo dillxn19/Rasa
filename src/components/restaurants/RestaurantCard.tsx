@@ -6,7 +6,6 @@ import {
   Dimensions,
   Pressable,
 } from 'react-native';
-import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -19,6 +18,7 @@ import { AvatarStack } from '@/components/ui/Avatar';
 import type { Restaurant, Review } from '@/types';
 import { CATEGORY_LABELS, DIETARY_LABELS, PRICE_LABELS } from '@/types';
 import { getOpenStatus } from '@/lib/openingHours';
+import { CoverImage } from './CoverImage';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/authStore';
 import { saveRestaurant, unsaveRestaurant } from '@/services/restaurants';
@@ -46,6 +46,8 @@ interface RestaurantCardProps {
   onPress?: () => void;
   showFriendRating?: boolean;
   friendReviews?: Review[];
+  distance?: string | null;
+  hideActions?: boolean;
   style?: object;
 }
 
@@ -54,6 +56,8 @@ export function RestaurantCard({
   onPress,
   showFriendRating = false,
   friendReviews = [],
+  distance,
+  hideActions = false,
   style,
 }: RestaurantCardProps) {
   const press = usePressScale();
@@ -72,6 +76,20 @@ export function RestaurantCard({
     Haptics.selectionAsync().catch(() => {});
     if (onPress) onPress();
     else router.push(`/restaurant/${restaurant.slug ?? restaurant.id}`);
+  };
+
+  // Quick-rate: jump into the review flow with this place preselected.
+  const handleRate = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    router.push({
+      pathname: '/(tabs)/add',
+      params: {
+        restaurantId: restaurant.id,
+        restaurantName: restaurant.name,
+        restaurantCategory: restaurant.category,
+        restaurantCity: restaurant.city ?? '',
+      },
+    } as any);
   };
 
   // Toggle bookmark directly from the card (no need to open the restaurant).
@@ -96,8 +114,9 @@ export function RestaurantCard({
   };
 
   const openStatus = getOpenStatus(restaurant.opening_hours);
-  const isHalal = restaurant.dietary_options.includes('halal_certified');
-  const isMuslimFriendly = !isHalal && restaurant.dietary_options.includes('muslim_friendly');
+  const dietary = restaurant.dietary_options ?? [];
+  const isHalal = dietary.includes('halal_certified');
+  const isMuslimFriendly = !isHalal && dietary.includes('muslim_friendly');
 
   return (
     <AnimatedPressable
@@ -108,32 +127,36 @@ export function RestaurantCard({
     >
       {/* Photo */}
       <View style={styles.photoContainer}>
-        {restaurant.cover_photo_url ? (
-          <Image source={{ uri: restaurant.cover_photo_url }} style={styles.photo} contentFit="cover" transition={250} />
-        ) : (
-          <View style={[styles.photo, styles.photoFallback]}>
-            <Ionicons name="restaurant-outline" size={36} color={colors.gray300} />
-          </View>
-        )}
+        <CoverImage uri={restaurant.cover_photo_url} category={restaurant.category} emojiSize={38} fill />
 
-        {/* Been-there checkmark (rated) — otherwise a functional bookmark */}
-        {hasVisited ? (
-          <View style={[styles.saveBtn, styles.visitedBtn]}>
-            <Ionicons name="checkmark-circle" size={22} color={colors.success} />
-          </View>
-        ) : (
-          <TouchableOpacity
-            style={[styles.saveBtn, isSaved && styles.saveBtnActive]}
-            onPress={handleSave}
-            hitSlop={8}
-            activeOpacity={0.8}
-          >
-            <Ionicons
-              name={isSaved ? 'bookmark' : 'bookmark-outline'}
-              size={20}
-              color={isSaved ? colors.bookmarked : colors.white}
-            />
-          </TouchableOpacity>
+        {/* Top-right actions: bookmark + rate (or a been-there checkmark).
+            Hidden in contexts that own the corner (e.g. list management). */}
+        {!hideActions && (
+        <View style={styles.cardActions}>
+          {hasVisited ? (
+            <View style={[styles.iconBtn, styles.visitedBtn]}>
+              <Ionicons name="checkmark-circle" size={22} color={colors.success} />
+            </View>
+          ) : (
+            <>
+              <TouchableOpacity
+                style={[styles.iconBtn, isSaved && styles.saveBtnActive]}
+                onPress={handleSave}
+                hitSlop={6}
+                activeOpacity={0.8}
+              >
+                <Ionicons
+                  name={isSaved ? 'bookmark' : 'bookmark-outline'}
+                  size={18}
+                  color={isSaved ? colors.bookmarked : colors.white}
+                />
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.iconBtn, styles.rateBtn]} onPress={handleRate} hitSlop={6} activeOpacity={0.85}>
+                <Ionicons name="add" size={20} color={colors.white} />
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
         )}
 
         {/* Halal badge */}
@@ -149,17 +172,14 @@ export function RestaurantCard({
       {/* Content */}
       <View style={styles.content}>
         <View style={styles.nameRow}>
+          {/* No aggregate rating on cards — ratings live on the restaurant page
+              only (avoids surfacing borrowed/unrated numbers). */}
           <RText variant="titleLarge" numberOfLines={1} style={{ flex: 1 }}>{restaurant.name}</RText>
-          <View style={styles.ratingPill}>
-            <RText style={{ fontSize: 12 }}>⭐</RText>
-            <RText variant="titleSmall" style={{ marginLeft: 3 }}>
-              {restaurant.overall_rating.toFixed(1)}
-            </RText>
-          </View>
         </View>
 
         <View style={styles.metaRow}>
           <RText variant="bodySmall" color={colors.textSecondary} numberOfLines={1} style={{ flex: 1 }}>
+            {distance ? <RText variant="bodySmall" color={colors.primary} style={{ fontWeight: '700' }}>{distance} · </RText> : null}
             {CATEGORY_LABELS[restaurant.category]} · {restaurant.area ?? restaurant.city} · {restaurant.price_range}
           </RText>
           {openStatus.isOpen !== null && (
@@ -213,18 +233,7 @@ export function RestaurantHeroCard({
       onPress={handlePress}
       activeOpacity={0.93}
     >
-      {restaurant.cover_photo_url ? (
-        <Image
-          source={{ uri: restaurant.cover_photo_url }}
-          style={styles.heroPhoto}
-          contentFit="cover"
-          transition={300}
-        />
-      ) : (
-        <View style={[styles.heroPhoto, styles.photoFallback]}>
-          <Ionicons name="restaurant-outline" size={48} color={colors.gray300} />
-        </View>
-      )}
+      <CoverImage uri={restaurant.cover_photo_url} category={restaurant.category} emojiSize={52} fill transition={300} />
 
       <LinearGradient
         colors={['transparent', 'rgba(0,0,0,0.85)']}
@@ -245,11 +254,6 @@ export function RestaurantHeroCard({
           {restaurant.name}
         </RText>
         <View style={styles.heroMeta}>
-          <StarRating value={restaurant.overall_rating} size={14} readonly compact color={colors.starFilled} />
-          <RText variant="bodySmall" color={colors.whiteTransparent80} style={{ marginLeft: spacing[3] }}>
-            {restaurant.total_reviews} reviews
-          </RText>
-          <View style={styles.dot} />
           <RText variant="bodySmall" color={colors.whiteTransparent80}>
             {restaurant.area ?? restaurant.city}
           </RText>
@@ -285,19 +289,12 @@ export function RestaurantChip({
       onPress={onPress ?? (() => router.push(`/restaurant/${restaurant.slug ?? restaurant.id}`))}
       activeOpacity={0.88}
     >
-      {restaurant.cover_photo_url ? (
-        <Image
-          source={{ uri: restaurant.cover_photo_url }}
-          style={styles.chipPhoto}
-          contentFit="cover"
-          transition={200}
-        />
-      ) : (
-        <View style={[styles.chipPhoto, styles.photoFallback]} />
-      )}
+      <CoverImage uri={restaurant.cover_photo_url} category={restaurant.category} emojiSize={30} style={styles.chipPhoto} transition={200} />
       <View style={styles.chipContent}>
         <RText variant="titleSmall" numberOfLines={1}>{restaurant.name}</RText>
-        <StarRating value={restaurant.overall_rating} size={11} readonly compact />
+        <Caption color={colors.textTertiary} numberOfLines={1}>
+          {restaurant.area ?? restaurant.city}
+        </Caption>
       </View>
     </TouchableOpacity>
   );
@@ -325,16 +322,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  saveBtn: {
+  cardActions: {
     position: 'absolute',
     top: spacing[3],
     right: spacing[3],
+    flexDirection: 'row',
+    gap: spacing[2],
+  },
+  iconBtn: {
     backgroundColor: colors.blackTransparent40,
     borderRadius: radius.full,
     padding: 8,
   },
   saveBtnActive: {
     backgroundColor: colors.white,
+  },
+  rateBtn: {
+    backgroundColor: colors.primary,
   },
   visitedBtn: {
     backgroundColor: colors.white,
@@ -365,6 +369,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.accentSurface,
+    paddingHorizontal: spacing[2],
+    paddingVertical: 3,
+    borderRadius: radius.full,
+  },
+  newPill: {
+    backgroundColor: colors.gray100,
     paddingHorizontal: spacing[2],
     paddingVertical: 3,
     borderRadius: radius.full,

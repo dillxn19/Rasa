@@ -50,6 +50,13 @@ export async function getDishById(id: string, userId?: string): Promise<Dish | n
   };
 }
 
+/**
+ * A dish only surfaces publicly for a restaurant once at least this many distinct
+ * users have tagged it there (tag_count == distinct-user count). Restaurants that
+ * already have real dish ratings surface regardless of tags.
+ */
+export const MIN_TAGS_TO_SURFACE = 2;
+
 export async function getTopRestaurantsForDish(dishId: string, limit = 10): Promise<RestaurantDishEntry[]> {
   const { data, error } = await supabase
     .from('restaurant_dishes')
@@ -59,12 +66,41 @@ export async function getTopRestaurantsForDish(dishId: string, limit = 10): Prom
     `)
     .eq('dish_id', dishId)
     .eq('is_available', true)
-    .order('rating_count', { ascending: false })
+    // Surface a restaurant if it has real dish ratings OR enough community tags.
+    .or(`rating_count.gte.1,tag_count.gte.${MIN_TAGS_TO_SURFACE}`)
+    // signal_score = rating_count + tag_count (generated column, migration 010).
+    .order('signal_score', { ascending: false })
     .order('average_rating', { ascending: false })
     .limit(limit);
 
   if (error || !data) return [];
   return data as RestaurantDishEntry[];
+}
+
+/**
+ * Tags a dish at a restaurant for a user (fire-and-forget from the review flow).
+ * Pass a canonical `dishId` when known, or a free-text `dishName` to create the
+ * dish if it doesn't exist. No coins — tagging is un-farmable engagement.
+ * Runs through the SECURITY DEFINER `tag_dish` RPC. Returns the dish id or null.
+ */
+export async function tagDish(params: {
+  userId: string;
+  restaurantId: string;
+  dishId?: string;
+  dishName?: string;
+}): Promise<string | null> {
+  const { data, error } = await supabase.rpc('tag_dish', {
+    p_user_id: params.userId,
+    p_restaurant_id: params.restaurantId,
+    p_dish_id: params.dishId ?? null,
+    p_dish_name: params.dishName ?? null,
+  });
+
+  if (error) {
+    console.error('[tagDish]', error);
+    return null;
+  }
+  return (data as string) ?? null;
 }
 
 export async function getTopDishes(limit = 10): Promise<Dish[]> {

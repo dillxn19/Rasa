@@ -1,6 +1,6 @@
 import React from 'react';
 import {
-  View, ScrollView, StyleSheet, TouchableOpacity, ActivityIndicator, Share,
+  View, ScrollView, StyleSheet, TouchableOpacity, ActivityIndicator,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -15,7 +15,8 @@ import { Avatar } from '@/components/ui/Avatar';
 import { RestaurantCard } from '@/components/restaurants/RestaurantCard';
 import { queryKeys } from '@/lib/queryClient';
 import { useAuthStore, selectCurrentUserId } from '@/stores/authStore';
-import { getListById, followList, unfollowList } from '@/services/lists';
+import { getListById, followList, unfollowList, removeRestaurantFromList, reorderListItems } from '@/services/lists';
+import { toast } from '@/stores/toastStore';
 import type { List } from '@/types';
 
 export default function ListScreen() {
@@ -46,6 +47,30 @@ export default function ListScreen() {
     if (!userId) { router.push('/(auth)/login'); return; }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     followMutation.mutate(!list?.is_following);
+  };
+
+  const isOwner = !!userId && !!list && (list as any).user_id === userId;
+
+  const removeMutation = useMutation({
+    mutationFn: (restaurantId: string) => removeRestaurantFromList(id!, restaurantId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.list(id!) }),
+    onError: () => toast.error('Could not remove that place.'),
+  });
+
+  const reorderMutation = useMutation({
+    mutationFn: (orderedIds: string[]) => reorderListItems(id!, orderedIds),
+    onError: () => { toast.error('Could not reorder.'); qc.invalidateQueries({ queryKey: queryKeys.list(id!) }); },
+  });
+
+  // Move an item up/down: optimistic cache reorder, then persist positions.
+  const moveItem = (index: number, dir: -1 | 1) => {
+    const items = [...((list as any)?.items ?? [])];
+    const target = index + dir;
+    if (target < 0 || target >= items.length) return;
+    [items[index], items[target]] = [items[target], items[index]];
+    Haptics.selectionAsync().catch(() => {});
+    qc.setQueryData(queryKeys.list(id!), (old: any) => (old ? { ...old, items } : old));
+    reorderMutation.mutate(items.filter((it: any) => it.restaurant).map((it: any) => it.restaurant.id));
   };
 
   if (isLoading) {
@@ -84,9 +109,7 @@ export default function ListScreen() {
             <TouchableOpacity style={styles.navBtn} onPress={() => router.back()}>
               <Ionicons name="arrow-back" size={22} color={colors.white} />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.navBtn} onPress={() =>
-              Share.share({ title: list.title, message: `Check out "${list.title}" on Rasa!` })
-            }>
+            <TouchableOpacity style={styles.navBtn} onPress={() => router.push(`/list/share?listId=${id}`)}>
               <Ionicons name="share-outline" size={22} color={colors.white} />
             </TouchableOpacity>
           </View>
@@ -125,26 +148,47 @@ export default function ListScreen() {
           </View>
         </View>
 
-        {/* Follow button */}
+        {/* Owner controls vs. follow */}
         <View style={styles.followBar}>
-          <TouchableOpacity
-            style={[styles.followBtn, list.is_following && styles.followBtnActive]}
-            onPress={handleFollowToggle}
-          >
-            <Ionicons
-              name={list.is_following ? 'bookmark' : 'bookmark-outline'}
-              size={16}
-              color={list.is_following ? colors.white : colors.primary}
-            />
-            <RText style={{
-              fontSize: 14,
-              fontWeight: '700',
-              color: list.is_following ? colors.white : colors.primary,
-              marginLeft: 5,
-            }}>
-              {list.is_following ? 'Saved' : 'Save List'}
-            </RText>
-          </TouchableOpacity>
+          {isOwner ? (
+            <View style={styles.ownerRow}>
+              <TouchableOpacity
+                style={styles.ownerBtn}
+                onPress={() => router.push(`/list/add?listId=${id}`)}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="add" size={18} color={colors.white} />
+                <RText style={styles.ownerBtnText}>Add places</RText>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.ownerBtn, styles.ownerBtnOutline]}
+                onPress={() => router.push(`/list/share?listId=${id}`)}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="share-social" size={16} color={colors.primary} />
+                <RText style={[styles.ownerBtnText, { color: colors.primary }]}>Share image</RText>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={[styles.followBtn, list.is_following && styles.followBtnActive]}
+              onPress={handleFollowToggle}
+            >
+              <Ionicons
+                name={list.is_following ? 'bookmark' : 'bookmark-outline'}
+                size={16}
+                color={list.is_following ? colors.white : colors.primary}
+              />
+              <RText style={{
+                fontSize: 14,
+                fontWeight: '700',
+                color: list.is_following ? colors.white : colors.primary,
+                marginLeft: 5,
+              }}>
+                {list.is_following ? 'Saved' : 'Save List'}
+              </RText>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Restaurants */}
@@ -153,9 +197,36 @@ export default function ListScreen() {
         </H4>
 
         <View style={styles.restaurantList}>
-          {(list.items ?? []).map((item) => (
+          {(list.items ?? []).map((item, index) => (
             <View key={item.id} style={styles.restaurantItem}>
-              {item.restaurant && <RestaurantCard restaurant={item.restaurant as any} />}
+              {item.restaurant && <RestaurantCard restaurant={item.restaurant as any} hideActions={isOwner} />}
+              {isOwner && item.restaurant && (
+                <View style={styles.ownerControls}>
+                  <TouchableOpacity
+                    style={[styles.ctrlBtn, index === 0 && styles.ctrlBtnDisabled]}
+                    onPress={() => moveItem(index, -1)}
+                    disabled={index === 0}
+                    hitSlop={6}
+                  >
+                    <Ionicons name="chevron-up" size={18} color={colors.white} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.ctrlBtn, index === (list.items!.length - 1) && styles.ctrlBtnDisabled]}
+                    onPress={() => moveItem(index, 1)}
+                    disabled={index === (list.items!.length - 1)}
+                    hitSlop={6}
+                  >
+                    <Ionicons name="chevron-down" size={18} color={colors.white} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.ctrlBtn}
+                    onPress={() => removeMutation.mutate((item.restaurant as any).id)}
+                    hitSlop={6}
+                  >
+                    <Ionicons name="close" size={18} color={colors.white} />
+                  </TouchableOpacity>
+                </View>
+              )}
               {item.note && (
                 <View style={styles.itemNote}>
                   <Ionicons name="chatbubble-outline" size={13} color={colors.textTertiary} />
@@ -242,7 +313,28 @@ const styles = StyleSheet.create({
     gap: spacing[3],
     paddingBottom: spacing[4],
   },
-  restaurantItem: { gap: spacing[2] },
+  restaurantItem: { gap: spacing[2], position: 'relative' },
+  removeItemBtn: {
+    position: 'absolute', top: spacing[2], right: spacing[2],
+    backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 12,
+  },
+  ownerControls: {
+    position: 'absolute', top: spacing[2], right: spacing[2],
+    flexDirection: 'row', gap: spacing[2],
+  },
+  ctrlBtn: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  ctrlBtnDisabled: { opacity: 0.35 },
+  ownerRow: { flexDirection: 'row', gap: spacing[3] },
+  ownerBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.primary, paddingVertical: spacing[3], borderRadius: radius.xl,
+  },
+  ownerBtnOutline: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: colors.primary },
+  ownerBtnText: { color: colors.white, fontSize: 14, fontWeight: '700', marginLeft: 5 },
   itemNote: {
     flexDirection: 'row',
     alignItems: 'flex-start',

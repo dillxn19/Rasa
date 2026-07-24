@@ -21,6 +21,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { toast } from '@/stores/toastStore';
 import { uploadAvatar } from '@/lib/supabase';
 import { MALAYSIA_CITIES } from '@/types';
+import { KL_UNIVERSITIES } from '@/lib/schools';
 
 export default function EditProfileScreen() {
   const { profile, updateProfile } = useAuthStore();
@@ -28,9 +29,17 @@ export default function EditProfileScreen() {
   const [displayName, setDisplayName] = useState(profile?.display_name ?? '');
   const [bio, setBio] = useState(profile?.bio ?? '');
   const [city, setCity] = useState(profile?.city ?? 'Kuala Lumpur');
+  const [school, setSchool] = useState(profile?.school ?? '');
+  // Days left before school can be changed again (7-day cooldown).
+  const schoolCooldownDays = (() => {
+    if (!profile?.school_updated_at) return 0;
+    const next = new Date(profile.school_updated_at).getTime() + 7 * 24 * 60 * 60 * 1000;
+    return Math.max(0, Math.ceil((next - Date.now()) / (24 * 60 * 60 * 1000)));
+  })();
   const [avatarUri, setAvatarUri] = useState<string | null>(profile?.avatar_url ?? null);
   const [isLoading, setIsLoading] = useState(false);
   const [showCityPicker, setShowCityPicker] = useState(false);
+  const [showSchoolPicker, setShowSchoolPicker] = useState(false);
 
   const handlePickAvatar = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -65,12 +74,17 @@ export default function EditProfileScreen() {
         display_name: displayName.trim(),
         bio: bio.trim() || null,
         city,
+        school: school.trim() || null,
         avatar_url: avatarUrl,
       });
 
       router.back();
-    } catch (e) {
-      toast.error('Failed to save profile. Please try again.');
+    } catch (e: any) {
+      if (String(e?.message ?? '').includes('school_change_cooldown')) {
+        toast.error('You can only change your school once every 7 days.');
+      } else {
+        toast.error('Failed to save profile. Please try again.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -165,6 +179,51 @@ export default function EditProfileScreen() {
                     </TouchableOpacity>
                   ))}
                 </View>
+              )}
+            </Field>
+
+            <Field label="School / University">
+              <TouchableOpacity
+                style={[styles.input, styles.selectInput]}
+                onPress={() => schoolCooldownDays === 0 && setShowSchoolPicker(!showSchoolPicker)}
+                disabled={schoolCooldownDays > 0}
+              >
+                <RText color={school ? colors.textPrimary : colors.textTertiary}>
+                  {school || 'Optional — select your campus'}
+                </RText>
+                <Ionicons name={showSchoolPicker ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textTertiary} />
+              </TouchableOpacity>
+              {showSchoolPicker && (
+                <View style={styles.cityDropdown}>
+                  <TouchableOpacity
+                    style={styles.cityOption}
+                    onPress={() => { setSchool(''); setShowSchoolPicker(false); }}
+                  >
+                    <RText variant="bodyMedium" color={colors.textSecondary}>None</RText>
+                    {!school && <Ionicons name="checkmark" size={16} color={colors.primary} />}
+                  </TouchableOpacity>
+                  {KL_UNIVERSITIES.map(s => (
+                    <TouchableOpacity
+                      key={s}
+                      style={[styles.cityOption, s === school && styles.cityOptionActive]}
+                      onPress={() => { setSchool(s); setShowSchoolPicker(false); }}
+                    >
+                      <RText
+                        variant="bodyMedium"
+                        color={s === school ? colors.primary : colors.textPrimary}
+                        style={s === school ? { fontWeight: '700' } : undefined}
+                      >
+                        {s}
+                      </RText>
+                      {s === school && <Ionicons name="checkmark" size={16} color={colors.primary} />}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+              {schoolCooldownDays > 0 && (
+                <RText variant="labelSmall" color={colors.textTertiary} style={{ marginTop: spacing[1] }}>
+                  You can change your school again in {schoolCooldownDays} {schoolCooldownDays === 1 ? 'day' : 'days'}.
+                </RText>
               )}
             </Field>
           </View>

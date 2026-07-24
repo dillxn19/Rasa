@@ -157,6 +157,7 @@ export async function getUserReviews(userId: string, page = 0): Promise<Review[]
     .eq('user_id', userId)
     .eq('is_public', true)
     .order('created_at', { ascending: false })
+    // (rank_score comes through via * — used to order the Rankings tab)
     .range(page * 20, (page + 1) * 20 - 1);
 
   if (error) throw error;

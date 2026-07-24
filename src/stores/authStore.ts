@@ -3,6 +3,7 @@ import type { Session, User as SupabaseUser } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { queryClient } from '@/lib/queryClient';
 import { loadUserHalal, useSettingsStore } from './settingsStore';
+import { identifyUser, resetAnalytics } from '@/lib/analytics';
 import type { User } from '@/types';
 
 interface AuthState {
@@ -59,7 +60,10 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
           .single();
 
         set({ profile: profile as User | null });
-        if (profile) await loadUserHalal((profile as User).id);
+        if (profile) {
+          await loadUserHalal((profile as User).id);
+          identifyUser((profile as User).id, { username: (profile as User).username });
+        }
       }
 
       // Listen for auth changes
@@ -80,9 +84,13 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
             .eq('auth_id', newSession.user.id)
             .single();
           set({ profile: profile as User | null });
-          if (profile) await loadUserHalal((profile as User).id);
+          if (profile) {
+            await loadUserHalal((profile as User).id);
+            identifyUser((profile as User).id, { username: (profile as User).username });
+          }
         } else if (event === 'SIGNED_OUT') {
           queryClient.clear();
+          resetAnalytics();
           set({ profile: null });
           useSettingsStore.getState().setHalalOnly(false);
         }

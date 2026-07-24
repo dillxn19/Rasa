@@ -25,6 +25,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { supabase } from '@/lib/supabase';
 import { getPendingReferrer, clearPendingReferrer } from '@/lib/referral';
 import { recordReferral, activateReferral } from '@/services/referrals';
+import { track } from '@/lib/analytics';
 import { getOnboardingSeedRestaurants, submitReview } from '@/services/restaurants';
 import { StarRating } from '@/components/ui/StarRating';
 import { Avatar } from '@/components/ui/Avatar';
@@ -157,6 +158,7 @@ export default function OnboardingScreen() {
         await clearPendingReferrer();
       } catch { /* non-fatal */ }
 
+      track('onboarding_completed');
       router.replace('/(tabs)');
     } catch (error) {
       toast.error('Failed to save profile. Please try again.');

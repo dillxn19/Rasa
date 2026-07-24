@@ -165,6 +165,42 @@ export async function getRestaurantReviews(restaurantId: string, page = 0): Prom
   return (data as Review[]) ?? [];
 }
 
+export interface CommunityPhoto {
+  url: string;
+  reviewId: string;
+  userId: string;
+  username?: string;
+  avatarUrl?: string | null;
+}
+
+/** All community photos for a restaurant (flattened from public reviews). */
+export async function getCommunityPhotos(restaurantId: string, limit = 30): Promise<CommunityPhoto[]> {
+  const { data, error } = await supabase
+    .from('reviews')
+    .select('id, user_id, photos, user:users!user_id ( username, avatar_url )')
+    .eq('restaurant_id', restaurantId)
+    .eq('is_public', true)
+    .not('photos', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(60);
+  if (error) return [];
+
+  const out: CommunityPhoto[] = [];
+  for (const row of (data ?? []) as any[]) {
+    for (const url of (row.photos ?? []) as string[]) {
+      out.push({
+        url,
+        reviewId: row.id,
+        userId: row.user_id,
+        username: row.user?.username,
+        avatarUrl: row.user?.avatar_url,
+      });
+      if (out.length >= limit) return out;
+    }
+  }
+  return out;
+}
+
 export async function getFriendReviews(restaurantId: string, userId: string): Promise<Review[]> {
   const { data, error } = await supabase
     .from('reviews')
@@ -202,6 +238,18 @@ export async function getExploreRestaurants(city?: string, page = 0): Promise<Re
   const { data, error } = await query;
   if (error) throw error;
   return (data as Restaurant[]) ?? [];
+}
+
+/** Full restaurant rows for a set of ids, preserving the input order. */
+export async function getRestaurantsByIds(ids: string[]): Promise<Restaurant[]> {
+  if (ids.length === 0) return [];
+  const { data } = await supabase
+    .from('restaurants')
+    .select('*')
+    .in('id', ids)
+    .eq('is_active', true);
+  const byId = new Map((data ?? []).map((r: any) => [r.id, r as Restaurant]));
+  return ids.map(id => byId.get(id)).filter(Boolean) as Restaurant[];
 }
 
 export async function getRestaurantsByCategory(
@@ -426,6 +474,16 @@ export async function submitReview(form: ReviewForm): Promise<Review> {
 
 export async function deleteReview(reviewId: string): Promise<void> {
   const { error } = await supabase.from('reviews').delete().eq('id', reviewId);
+  if (error) throw error;
+}
+
+/** Delete the current user's review for a restaurant (used by the rated-check). */
+export async function deleteReviewForRestaurant(userId: string, restaurantId: string): Promise<void> {
+  const { error } = await supabase
+    .from('reviews')
+    .delete()
+    .eq('user_id', userId)
+    .eq('restaurant_id', restaurantId);
   if (error) throw error;
 }
 

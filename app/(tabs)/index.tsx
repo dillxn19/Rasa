@@ -13,11 +13,14 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { saveUserHalal } from '@/stores/settingsStore';
 import { RText, Caption } from '@/components/ui/Text';
 import { Avatar } from '@/components/ui/Avatar';
+import { FlashList } from '@shopify/flash-list';
 import { FeedCard } from '@/components/feed/FeedCard';
 import { ForYouSection, TrendingSection } from '@/components/recommendations/ForYouSection';
 import { TimeAwareBanner } from '@/components/ui/TimeAwareBanner';
+import { EmailVerifyBanner } from '@/components/ui/EmailVerifyBanner';
 import { useAuthStore } from '@/stores/authStore';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { useBlockedUserIds } from '@/hooks/useBlockedUsers';
 import { getHomeFeed } from '@/services/feed';
 import { getRecommendations, getTrendingNearby, dismissRecommendation } from '@/services/recommendations';
 import { queryKeys } from '@/lib/queryClient';
@@ -30,7 +33,6 @@ export default function HomeScreen() {
   const { halalOnly, toggleHalalOnly } = useSettingsStore();
   const theme = useTheme();
   const qc = useQueryClient();
-  const scrollY = useRef(new Animated.Value(0)).current;
   const insets = useSafeAreaInsets();
   const safeTop = Math.max(insets.top, 44);
 
@@ -71,7 +73,8 @@ export default function HomeScreen() {
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.recommendations(profile?.id ?? '') }),
   });
 
-  const feedItems = feedData?.pages.flat() ?? [];
+  const blockedIds = useBlockedUserIds();
+  const feedItems = (feedData?.pages.flat() ?? []).filter(item => !blockedIds.has(item.actor.id));
   const recs = (recsData ?? []).filter(r =>
     !halalOnly || r.restaurant.dietary_options?.includes('halal_certified')
   );
@@ -125,7 +128,11 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      <ScrollView
+      <FlashList
+        data={feedItems}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => <FeedCard item={item} />}
+        estimatedItemSize={460}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -135,68 +142,46 @@ export default function HomeScreen() {
             colors={[colors.primary]}
           />
         }
-        onScroll={Animated.event(
-          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-          { useNativeDriver: false }
-        )}
-        scrollEventThrottle={16}
-      >
-        {/* Time-aware banner */}
-        <View style={{ paddingTop: spacing[4] }}>
-          <TimeAwareBanner />
-        </View>
-
-        {/* Monthly recap promo */}
-        <RecapPromo />
-
-        {/* For You recommendations */}
-        {!recsLoading && recs.length > 0 && (
-          <ForYouSection
-            recs={recs.slice(0, 8)}
-            onDismiss={(id) => dismissMutation.mutate(id)}
-          />
-        )}
-
-        {/* Trending section */}
-        {trending.length > 0 && (
-          <TrendingSection
-            title={`🔥 Trending in ${profile?.city ?? 'KL'}`}
-            subtitle={halalOnly ? 'Halal certified only' : 'Most popular this week'}
-            restaurants={trending}
-          />
-        )}
-
-        {/* Divider */}
-        <View style={styles.feedDivider}>
-          <View style={styles.dividerLine} />
-          <RText variant="labelSmall" color={colors.textTertiary} style={styles.dividerLabel}>
-            FRIENDS ACTIVITY
-          </RText>
-          <View style={styles.dividerLine} />
-        </View>
-
-        {/* Social feed */}
-        {feedItems.length === 0 && !feedLoading ? (
-          <EmptyFeed />
-        ) : (
-          feedItems.map(item => <FeedCard key={item.id} item={item} />)
-        )}
-
-        {/* Load more */}
-        {hasNextPage && (
-          <TouchableOpacity
-            style={styles.loadMoreBtn}
-            onPress={() => !isFetchingNextPage && fetchNextPage()}
-            disabled={isFetchingNextPage}
-          >
-            <Caption color={theme.primary}>
-              {isFetchingNextPage ? 'Loading...' : 'Load more'}
-            </Caption>
-          </TouchableOpacity>
-        )}
-
-        <View style={{ height: spacing[10] }} />
-      </ScrollView>
+        onEndReachedThreshold={0.6}
+        onEndReached={() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }}
+        ListHeaderComponent={
+          <View>
+            <EmailVerifyBanner />
+            <View style={{ paddingTop: spacing[4] }}>
+              <TimeAwareBanner />
+            </View>
+            <RecapPromo />
+            {!recsLoading && recs.length > 0 && (
+              <ForYouSection recs={recs.slice(0, 8)} onDismiss={(id) => dismissMutation.mutate(id)} />
+            )}
+            {trending.length > 0 && (
+              <TrendingSection
+                title={`🔥 Trending in ${profile?.city ?? 'KL'}`}
+                subtitle={halalOnly ? 'Halal certified only' : 'Most popular this week'}
+                restaurants={trending}
+              />
+            )}
+            <View style={styles.feedDivider}>
+              <View style={styles.dividerLine} />
+              <RText variant="labelSmall" color={colors.textTertiary} style={styles.dividerLabel}>
+                FRIENDS ACTIVITY
+              </RText>
+              <View style={styles.dividerLine} />
+            </View>
+          </View>
+        }
+        ListEmptyComponent={!feedLoading ? <EmptyFeed /> : null}
+        ListFooterComponent={
+          <View>
+            {isFetchingNextPage && (
+              <Caption color={colors.textTertiary} style={{ textAlign: 'center', paddingVertical: spacing[4] }}>
+                Loading…
+              </Caption>
+            )}
+            <View style={{ height: spacing[10] }} />
+          </View>
+        }
+      />
     </View>
   );
 }

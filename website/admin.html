@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Rasa Admin</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    body { background: var(--cream); }
+    .admin-wrap { max-width: 960px; margin: 0 auto; padding: 32px clamp(16px, 4vw, 40px) 80px; }
+    .admin-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; }
+    .admin-top h1 { font-size: 26px; letter-spacing: -0.5px; }
+    .ghost { background: #fff; color: var(--ink); border: 1px solid var(--border); box-shadow: none; }
+    .ghost:hover { background: #F3ECE4; }
+    /* Login */
+    .login { max-width: 380px; margin: 8vh auto 0; background: #fff; border: 1px solid var(--border); border-radius: 22px; padding: 32px; box-shadow: var(--shadow); }
+    .login h1 { font-size: 24px; margin-bottom: 6px; }
+    .login p { color: var(--muted); font-size: 14px; margin-bottom: 20px; }
+    .login form { display: flex; flex-direction: column; gap: 12px; }
+    .login input { background: #fff; border: 1.5px solid var(--border); border-radius: 14px; padding: 14px 16px; font-size: 15px; font-family: inherit; }
+    .login input:focus { outline: none; border-color: var(--chili); box-shadow: 0 0 0 4px rgba(217,72,65,.12); }
+    /* Stats */
+    .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 8px 0 32px; }
+    .stat { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 20px; }
+    .stat .n { font-size: 30px; font-weight: 800; letter-spacing: -1px; }
+    .stat .l { color: var(--muted); font-size: 13px; margin-top: 2px; }
+    .stat .s { color: var(--pandan); font-size: 12px; font-weight: 700; margin-top: 6px; }
+    h2.sec { font-size: 20px; margin: 8px 0 14px; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--border); border-radius: 18px; overflow: hidden; }
+    th, td { text-align: left; padding: 14px 16px; font-size: 14px; border-bottom: 1px solid var(--border); }
+    th { background: #FBF3EA; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+    tr:last-child td { border-bottom: none; }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+    .amb-tag { background: var(--primarySurface, #FEF0EE); color: var(--chili); font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 999px; margin-left: 8px; }
+    .msg { font-size: 14px; margin-top: 10px; }
+    .msg.error { color: var(--chili); }
+    .hidden { display: none; }
+    .muted { color: var(--muted); }
+    .count { font-size: 13px; font-weight: 700; color: var(--chili); background: #FEF0EE; padding: 2px 10px; border-radius: 999px; vertical-align: middle; }
+    td small { color: var(--muted); }
+    @media (max-width: 640px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } }
+  </style>
+</head>
+<body>
+  <!-- Login -->
+  <div id="login" class="login">
+    <h1>🍜 Rasa Admin</h1>
+    <p>Sign in with your Rasa admin account.</p>
+    <form id="login-form">
+      <input type="email" id="email" placeholder="Email" autocomplete="email" required />
+      <input type="password" id="password" placeholder="Password" autocomplete="current-password" required />
+      <button type="submit" class="btn btn-block">Sign in</button>
+      <p class="msg" id="login-msg"></p>
+    </form>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="dash" class="admin-wrap hidden">
+    <div class="admin-top">
+      <h1>🍜 Rasa Admin</h1>
+      <button class="btn btn-sm ghost" id="logout">Sign out</button>
+    </div>
+
+    <h2 class="sec">App analytics</h2>
+    <div class="stat-grid" id="stats"></div>
+
+    <h2 class="sec">Ambassador performance <span class="muted" style="font-size:14px;font-weight:400">· ranked by activations</span></h2>
+    <table id="amb-table">
+      <thead><tr><th>#</th><th>Person</th><th>Invited</th><th>Activated</th><th>Rate</th></tr></thead>
+      <tbody id="amb-body"></tbody>
+    </table>
+    <p class="msg muted" id="amb-empty"></p>
+
+    <h2 class="sec" style="margin-top:40px">Waitlist <span class="count" id="wl-count"></span></h2>
+    <table>
+      <thead><tr><th>Joined</th><th>Name</th><th>Email</th><th>Phone</th><th>Referral</th></tr></thead>
+      <tbody id="wl-body"></tbody>
+    </table>
+    <p class="msg muted" id="wl-empty"></p>
+
+    <h2 class="sec" style="margin-top:40px">Job applications <span class="count" id="ja-count"></span></h2>
+    <table>
+      <thead><tr><th>Date</th><th>Role</th><th>Name</th><th>Contact</th><th>Socials</th><th>Extra</th></tr></thead>
+      <tbody id="ja-body"></tbody>
+    </table>
+    <p class="msg muted" id="ja-empty"></p>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="admin.js"></script>
+</body>
+</html>

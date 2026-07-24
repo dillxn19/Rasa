@@ -12,7 +12,7 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { router, useFocusEffect } from 'expo-router';
 import { colors, spacing, radius, shadows } from '@/theme';
 import { getProfileTheme } from '@/theme/profileThemes';
@@ -20,13 +20,16 @@ import { RText, Caption, H2, Body } from '@/components/ui/Text';
 import { Avatar } from '@/components/ui/Avatar';
 import { useAuthStore } from '@/stores/authStore';
 import { getUserBadges, getUserPassport, getUserReviews, getUserLists, getTasteMatches } from '@/services/users';
-import { getSavedRestaurants } from '@/services/restaurants';
+import { getSavedRestaurants, deleteReview } from '@/services/restaurants';
 import { getUserSavedDishes } from '@/services/dishes';
 import { getUserCoins } from '@/services/coins';
 import { useFeatureAccess, unlockWithCoins, FEATURES, type FeatureDef } from '@/services/features';
 import { getReferralStats } from '@/services/referrals';
-import { shareInvite } from '@/lib/referral';
+import { shareInvite, copyReferralCode } from '@/lib/referral';
+import { track } from '@/lib/analytics';
 import { FeatureGateModal } from '@/components/ui/FeatureGateModal';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { deleteAccount } from '@/services/account';
 import { toast } from '@/stores/toastStore';
 import { useUserLocation } from '@/hooks/useUserLocation';
 import { distanceKm, formatDistance, type Coords } from '@/lib/geo';
@@ -77,8 +80,16 @@ export default function ProfileScreen() {
     staleTime: 1000 * 60,
   });
 
+  // Prefer the stable referral code; fall back to username for old links.
+  const inviteRef = profile?.referral_code ?? profile?.username;
   const handleInvite = () => {
-    if (profile?.username) shareInvite(profile.username);
+    if (inviteRef) { shareInvite(inviteRef); track('referral_shared'); }
+  };
+  const handleCopyCode = async () => {
+    if (!profile?.referral_code) return;
+    await copyReferralCode(profile.referral_code);
+    track('referral_code_copied');
+    toast.success('Referral code copied');
   };
 
   const openFeature = (featureId: string) => {
@@ -112,6 +123,36 @@ export default function ProfileScreen() {
     await signOut();
     router.replace('/(auth)/welcome');
   };
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [reviewToDelete, setReviewToDelete] = useState<string | null>(null);
+  const deleteReviewMutation = useMutation({
+    mutationFn: (rid: string) => deleteReview(rid),
+    onSuccess: () => {
+      setReviewToDelete(null);
+      if (profile) {
+        qc.invalidateQueries({ queryKey: queryKeys.userReviews(profile.id) });
+        qc.invalidateQueries({ queryKey: queryKeys.currentUser() });
+        qc.invalidateQueries({ queryKey: queryKeys.userPassport(profile.id) });
+      }
+      toast.success('Review deleted');
+    },
+    onError: () => toast.error('Could not delete the review.'),
+  });
+  const handleDeleteAccount = async () => {
+    setDeleting(true);
+    try {
+      await deleteAccount();
+      track('account_deleted');
+      await signOut();
+      setShowDeleteConfirm(false);
+      setDeleting(false);
+      router.replace('/(auth)/welcome');
+    } catch {
+      setDeleting(false);
+      toast.error('Could not delete account. Please try again.');
+    }
+  };
   const [activeTab, setActiveTab] = useState<TabKey>('reviews');
 
   const { data: badges } = useQuery({
@@ -132,16 +173,18 @@ export default function ProfileScreen() {
     enabled: !!profile && (activeTab === 'reviews' || activeTab === 'rankings'),
   });
 
+  // Load saved upfront (not just when the Saved tab is active) so the tab count
+  // is correct on first render and the tab loads instantly.
   const { data: savedRestaurants } = useQuery({
     queryKey: queryKeys.savedRestaurants(profile?.id ?? ''),
     queryFn: () => getSavedRestaurants(profile!.id),
-    enabled: !!profile && activeTab === 'saved',
+    enabled: !!profile,
   });
 
   const { data: savedDishes } = useQuery({
     queryKey: queryKeys.savedDishes(profile?.id ?? ''),
     queryFn: () => getUserSavedDishes(profile!.id),
-    enabled: !!profile && activeTab === 'saved',
+    enabled: !!profile,
   });
 
   const { data: userLists } = useQuery({
@@ -185,6 +228,8 @@ export default function ProfileScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false}>
+        {/* index 0 — everything above the tabs (wrapped so the sticky index is stable) */}
+        <View>
         {/* Cover + Header */}
         <View style={styles.coverContainer}>
           {profile.cover_url ? (
@@ -267,6 +312,12 @@ export default function ProfileScreen() {
             <View style={styles.locationRow}>
               <Ionicons name="location-outline" size={14} color={colors.textTertiary} />
               <Caption style={{ marginLeft: 4 }}>{profile.city}, Malaysia</Caption>
+              {profile.school ? (
+                <>
+                  <Ionicons name="school-outline" size={14} color={colors.textTertiary} style={{ marginLeft: spacing[3] }} />
+                  <Caption style={{ marginLeft: 4 }} numberOfLines={1}>{profile.school}</Caption>
+                </>
+              ) : null}
             </View>
           </View>
 
@@ -348,7 +399,9 @@ export default function ProfileScreen() {
           </View>
         )}
 
-        {/* Tabs */}
+        </View>{/* end index 0 header wrapper */}
+
+        {/* index 1 — sticky tabs */}
         <View style={styles.tabs}>
           {TABS.map(tab => (
             <TouchableOpacity
@@ -383,7 +436,7 @@ export default function ProfileScreen() {
         {/* Tab content */}
         <View style={styles.tabContent}>
           {activeTab === 'reviews' && (
-            <ReviewsList reviews={reviews ?? []} />
+            <ReviewsList reviews={reviews ?? []} onDelete={(rid) => setReviewToDelete(rid)} />
           )}
           {activeTab === 'rankings' && (
             <RankingsTab reviews={reviews ?? []} userId={profile.id} location={location} />
@@ -395,7 +448,9 @@ export default function ProfileScreen() {
               location={location}
             />
           )}
-          {activeTab === 'lists' && <ListsTab />}
+          {activeTab === 'lists' && (
+            <ListsTab lists={userLists ?? []} />
+          )}
           {activeTab === 'passport' && (
             <PassportView
               passport={passport}
@@ -421,16 +476,44 @@ export default function ProfileScreen() {
               label="Edit Profile"
               onPress={() => { setShowSettings(false); router.push('/edit-profile'); }}
             />
-            <SettingsItem
-              icon="gift-outline"
-              label="Invite Friends"
-              sublabel={
-                (referralStats?.activated ?? 0) > 0
-                  ? `${referralStats?.activated} joined & reviewed · +200 🪙 each`
-                  : 'Earn 🪙 and unlock features — refer a friend'
-              }
-              onPress={() => { setShowSettings(false); handleInvite(); }}
-            />
+            {profile.referral_code && (
+              <View style={styles.referCard}>
+                <View style={{ flex: 1 }}>
+                  <Caption color={colors.textTertiary}>YOUR REFERRAL CODE</Caption>
+                  <TouchableOpacity onPress={handleCopyCode} activeOpacity={0.7} style={styles.codeRow}>
+                    <RText variant="h3" style={{ letterSpacing: 2 }}>{profile.referral_code}</RText>
+                    <Ionicons name="copy-outline" size={18} color={colors.textTertiary} style={{ marginLeft: spacing[2] }} />
+                  </TouchableOpacity>
+                  {(referralStats?.activated ?? 0) > 0 ? (
+                    <Caption color={colors.success}>
+                      {referralStats?.activated} joined & reviewed · +200 🪙 each
+                    </Caption>
+                  ) : (
+                    <Caption color={colors.textTertiary}>Share it — you both earn 🪙 when they join.</Caption>
+                  )}
+                </View>
+                <TouchableOpacity
+                  style={styles.referBtn}
+                  onPress={() => { setShowSettings(false); handleInvite(); }}
+                  activeOpacity={0.9}
+                >
+                  <Ionicons name="share-social" size={16} color={colors.white} />
+                  <RText variant="labelMedium" color={colors.white} style={{ marginLeft: 6 }}>Refer</RText>
+                </TouchableOpacity>
+              </View>
+            )}
+            {profile.referral_code && (
+              <SettingsItem
+                icon="people-outline"
+                label="Referral Analytics"
+                sublabel={
+                  (referralStats?.total ?? 0) > 0
+                    ? `${referralStats?.total} invited · ${referralStats?.activated ?? 0} activated`
+                    : 'Track who joins & activates'
+                }
+                onPress={() => { setShowSettings(false); router.push('/referrals'); }}
+              />
+            )}
             <SettingsItem
               icon="stats-chart-outline"
               label="Taste Analytics"
@@ -438,14 +521,52 @@ export default function ProfileScreen() {
               onPress={() => openFeature('taste_analytics')}
             />
             <SettingsItem
+              icon="shield-checkmark-outline"
+              label="Privacy Policy"
+              onPress={() => { setShowSettings(false); router.push('/legal/privacy'); }}
+            />
+            <SettingsItem
+              icon="document-text-outline"
+              label="Terms of Service"
+              onPress={() => { setShowSettings(false); router.push('/legal/terms'); }}
+            />
+            <SettingsItem
               icon="log-out-outline"
               label="Sign Out"
               destructive
               onPress={handleSignOut}
             />
+            <SettingsItem
+              icon="trash-outline"
+              label="Delete Account"
+              destructive
+              onPress={() => { setShowSettings(false); setShowDeleteConfirm(true); }}
+            />
           </View>
         </TouchableOpacity>
       </Modal>
+
+      <ConfirmDialog
+        visible={!!reviewToDelete}
+        title="Delete this review?"
+        message="Your rating, text and photos for this place will be removed."
+        confirmLabel="Delete"
+        destructive
+        loading={deleteReviewMutation.isPending}
+        onConfirm={() => reviewToDelete && deleteReviewMutation.mutate(reviewToDelete)}
+        onCancel={() => setReviewToDelete(null)}
+      />
+
+      <ConfirmDialog
+        visible={showDeleteConfirm}
+        title="Delete your account?"
+        message="This permanently removes your profile, reviews, photos, followers, coins and everything else. This cannot be undone."
+        confirmLabel="Delete forever"
+        destructive
+        loading={deleting}
+        onConfirm={handleDeleteAccount}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
 
       <FeatureGateModal
         feature={gate}
@@ -469,7 +590,7 @@ function StatItem({ value, label, onPress }: { value: number; label: string; onP
   );
 }
 
-function ReviewsList({ reviews }: { reviews: Review[] }) {
+function ReviewsList({ reviews, onDelete }: { reviews: Review[]; onDelete?: (id: string) => void }) {
   if (reviews.length === 0) {
     return (
       <View style={styles.emptyTab}>
@@ -483,7 +604,7 @@ function ReviewsList({ reviews }: { reviews: Review[] }) {
   return (
     <View style={styles.reviewsList}>
       {reviews.map(review => (
-        <ReviewCard key={review.id} review={review} />
+        <ReviewCard key={review.id} review={review} onDelete={onDelete} />
       ))}
     </View>
   );
@@ -735,15 +856,17 @@ function RankingsTab({ reviews, userId, location }: { reviews: Review[]; userId:
     return cats.includes((r as any).restaurant?.category ?? '');
   });
 
-  // Rank position is always by score (Beli-style), even when sorted by distance.
+  // Rank uses the fine-grained rank_score (set by pairwise comparisons),
+  // falling back to rating*2 for reviews that predate ranking.
+  const scoreOf = (r: Review) => r.rank_score ?? (r.rating ?? 0) * 2;
   const rankOf = new Map(
-    [...filtered].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0)).map((r, i) => [r.id, i + 1]),
+    [...filtered].sort((a, b) => scoreOf(b) - scoreOf(a)).map((r, i) => [r.id, i + 1]),
   );
 
   const sorted =
     mode === 'distance' && coords
       ? byDistance(filtered, coords, r => ({ lat: r.restaurant?.latitude, lng: r.restaurant?.longitude }))
-      : [...filtered].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+      : [...filtered].sort((a, b) => scoreOf(b) - scoreOf(a));
 
   return (
     <View style={{ paddingTop: spacing[2] }}>
@@ -876,25 +999,38 @@ function SavedTab({ restaurants, dishes, location }: { restaurants: any[]; dishe
 
 // Lists are not shipped yet — surfaced as a "coming soon" teaser so users know
 // what Custom Lists will be.
-function ListsTab() {
+function ListsTab({ lists }: { lists: List[] }) {
+  // Custom Lists is available to everyone — curate + share themed collections.
   return (
-    <View style={styles.comingSoon}>
-      <LinearGradient
-        colors={[colors.primary, colors.accent]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.comingSoonIcon}
-      >
-        <Ionicons name="list" size={30} color={colors.white} />
-      </LinearGradient>
-      <View style={styles.comingSoonBadge}>
-        <RText variant="labelSmall" color={colors.primary} style={{ letterSpacing: 1 }}>COMING SOON</RText>
-      </View>
-      <RText variant="titleLarge" style={{ marginTop: spacing[3] }}>Custom Lists</RText>
-      <Caption color={colors.textSecondary} align="center" style={{ marginTop: spacing[2], maxWidth: 300, lineHeight: 20 }}>
-        Curate and share your own themed collections — “Best Nasi Lemak in KL”, “Date Night Spots”,
-        weekend food trips. Save places into lists and share them with friends.
-      </Caption>
+    <View style={{ paddingHorizontal: spacing[4], paddingTop: spacing[2] }}>
+      <TouchableOpacity style={styles.newListBtn} onPress={() => router.push('/list/new')} activeOpacity={0.85}>
+        <Ionicons name="add-circle" size={22} color={colors.primary} />
+        <RText variant="titleSmall" color={colors.primary} style={{ marginLeft: spacing[2] }}>New list</RText>
+      </TouchableOpacity>
+
+      {lists.length === 0 ? (
+        <View style={{ alignItems: 'center', paddingVertical: spacing[10] }}>
+          <RText style={{ fontSize: 40, lineHeight: 52 }}>📋</RText>
+          <Caption color={colors.textSecondary} align="center" style={{ marginTop: spacing[3], maxWidth: 260 }}>
+            Create your first list — like “Top Cafés in PJ” — then share it as an image on social.
+          </Caption>
+        </View>
+      ) : (
+        lists.map(list => (
+          <TouchableOpacity key={list.id} style={styles.listRow} onPress={() => router.push(`/list/${list.id}`)} activeOpacity={0.8}>
+            <LinearGradient colors={[colors.primary, colors.accent]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.listRowIcon}>
+              <Ionicons name="list" size={20} color={colors.white} />
+            </LinearGradient>
+            <View style={{ flex: 1, marginLeft: spacing[3] }}>
+              <RText variant="titleSmall" numberOfLines={1}>{list.title}</RText>
+              <Caption color={colors.textTertiary}>
+                {(list.restaurant_count ?? 0)} places · {(list.follower_count ?? 0)} saves
+              </Caption>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+          </TouchableOpacity>
+        ))
+      )}
     </View>
   );
 }
@@ -954,10 +1090,13 @@ const styles = StyleSheet.create({
   locationRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing[1] },
   stats: {
     flexDirection: 'row',
-    backgroundColor: colors.gray50,
+    backgroundColor: colors.surface,
     borderRadius: radius.xl,
     padding: spacing[4],
     marginBottom: spacing[4],
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderLight,
+    ...(shadows.xs as object),
   },
   statItem: { flex: 1, alignItems: 'center', gap: spacing[0.5] },
   statDivider: { width: 1, backgroundColor: colors.border },
@@ -1031,6 +1170,23 @@ const styles = StyleSheet.create({
     paddingVertical: spacing[3],
     gap: spacing[3],
   },
+  referCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primarySurface,
+    borderRadius: radius.xl,
+    padding: spacing[4],
+    marginBottom: spacing[2],
+  },
+  codeRow: { flexDirection: 'row', alignItems: 'center', marginVertical: spacing[1] },
+  referBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: radius.full,
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
+  },
   settingsIcon: {
     width: 40,
     height: 40,
@@ -1064,6 +1220,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
+    backgroundColor: colors.background,
   },
   tab: {
     flex: 1,
@@ -1075,6 +1232,20 @@ const styles = StyleSheet.create({
   },
   tabActive: { borderBottomColor: colors.primary },
   tabContent: { paddingTop: spacing[2] },
+  newListBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1.5, borderColor: colors.primary, borderStyle: 'dashed',
+    borderRadius: radius.xl, paddingVertical: spacing[3], marginBottom: spacing[4],
+  },
+  listRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: spacing[3],
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border,
+  },
+  listRowIcon: {
+    width: 44, height: 44, borderRadius: radius.lg,
+    alignItems: 'center', justifyContent: 'center',
+  },
   emptyTab: {
     alignItems: 'center',
     paddingVertical: spacing[16],

@@ -59,7 +59,6 @@ export function DishRankCard({ dish, rank, restaurantName, restaurantCity, onPre
             </Caption>
           </View>
         )}
-        <StarRating value={dish.average_rating} size={12} readonly compact />
       </View>
 
       <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
@@ -115,12 +114,8 @@ export function DishHeroCard({ dish, onPress }: DishHeroCardProps) {
           <Caption color="rgba(255,255,255,0.7)">{dish.name_bm}</Caption>
         )}
         <View style={styles.heroStats}>
-          <StarRating value={dish.average_rating} size={14} readonly compact color={colors.accent} />
-          <Caption color="rgba(255,255,255,0.7)" style={{ marginLeft: spacing[3] }}>
-            {dish.total_ratings.toLocaleString()} ratings
-          </Caption>
-          <Caption color="rgba(255,255,255,0.7)" style={{ marginLeft: spacing[2] }}>
-            · {dish.total_restaurant_count} restaurants
+          <Caption color="rgba(255,255,255,0.7)">
+            {dish.total_restaurant_count} {dish.total_restaurant_count === 1 ? 'spot' : 'spots'}
           </Caption>
         </View>
       </View>
@@ -146,7 +141,6 @@ export function DishChip({ dish, onPress }: { dish: Dish; onPress?: () => void }
       )}
       <View style={styles.chipContent}>
         <RText variant="titleSmall" numberOfLines={1}>{dish.name}</RText>
-        <StarRating value={dish.average_rating} size={11} readonly compact />
       </View>
     </TouchableOpacity>
   );

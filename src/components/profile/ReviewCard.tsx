@@ -51,7 +51,7 @@ function ReviewPhotos({ photos }: { photos: string[] }) {
  * OWN posted photos underneath (never the restaurant's stock cover, so the list
  * stays clean and standardized), then the review text and date.
  */
-export function ReviewCard({ review }: { review: Review }) {
+export function ReviewCard({ review, onDelete }: { review: Review; onDelete?: (id: string) => void }) {
   const photos = (review.photos ?? []) as string[];
   const r = review.restaurant as any;
   const meta = [
@@ -63,6 +63,8 @@ export function ReviewCard({ review }: { review: Review }) {
     <TouchableOpacity
       style={styles.card}
       onPress={() => review.restaurant && router.push(`/restaurant/${review.restaurant.id}`)}
+      onLongPress={onDelete ? () => onDelete(review.id) : undefined}
+      delayLongPress={350}
       activeOpacity={0.9}
     >
       <View style={styles.header}>

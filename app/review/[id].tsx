@@ -3,7 +3,7 @@ import {
   View, StyleSheet, TextInput, TouchableOpacity, FlatList,
   KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -14,19 +14,26 @@ import { RText, Caption } from '@/components/ui/Text';
 import { Avatar } from '@/components/ui/Avatar';
 import { useAuthStore } from '@/stores/authStore';
 import { getComments, addComment, type Comment } from '@/services/comments';
+import { useBlockedUserIds } from '@/hooks/useBlockedUsers';
+import { ReportSheet } from '@/components/ui/ReportSheet';
 import { toast } from '@/stores/toastStore';
 
 export default function CommentsScreen() {
   const { id: reviewId } = useLocalSearchParams<{ id: string }>();
   const { profile } = useAuthStore();
   const qc = useQueryClient();
+  const insets = useSafeAreaInsets();
   const [text, setText] = useState('');
+  const [headerH, setHeaderH] = useState(52);
+  const [showReport, setShowReport] = useState(false);
 
-  const { data: comments = [], isLoading } = useQuery({
+  const { data: allComments = [], isLoading } = useQuery({
     queryKey: ['comments', reviewId],
     queryFn: () => getComments(reviewId),
     enabled: !!reviewId,
   });
+  const blockedIds = useBlockedUserIds();
+  const comments = allComments.filter(c => !blockedIds.has(c.user_id));
 
   const addMutation = useMutation({
     mutationFn: () => addComment(profile!.id, reviewId, text),
@@ -44,18 +51,27 @@ export default function CommentsScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={styles.header} onLayout={(e) => setHeaderH(e.nativeEvent.layout.height)}>
         <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}>
           <Ionicons name="chevron-down" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <RText variant="titleMedium">Comments</RText>
-        <View style={styles.headerBtn} />
+        <TouchableOpacity onPress={() => setShowReport(true)} style={styles.headerBtn}>
+          <Ionicons name="flag-outline" size={20} color={colors.textSecondary} />
+        </TouchableOpacity>
       </View>
+
+      <ReportSheet
+        visible={showReport}
+        target={{ reporterId: profile?.id ?? '', reviewId }}
+        targetLabel="this review"
+        onClose={() => setShowReport(false)}
+      />
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + headerH : 0}
       >
         {isLoading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: spacing[10] }} />

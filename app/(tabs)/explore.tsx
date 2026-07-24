@@ -15,10 +15,16 @@ import { RText, Caption } from '@/components/ui/Text';
 import { Avatar } from '@/components/ui/Avatar';
 import { RestaurantCard } from '@/components/restaurants/RestaurantCard';
 import { useAuthStore } from '@/stores/authStore';
-import { getRestaurantsByCategory, searchRestaurantsSupabase } from '@/services/restaurants';
+import { getRestaurantsByCategory, searchRestaurantsSupabase, getRestaurantsByIds } from '@/services/restaurants';
 import { getDiscoverUsers, followUser, unfollowUser, searchUsers } from '@/services/users';
 import { getFeaturedDishes, getTopRestaurantsForDish, searchDishes } from '@/services/dishes';
-import { multiSearch, searchRestaurants } from '@/lib/algolia';
+import { searchRestaurants } from '@/lib/algolia';
+import {
+  searchPlaces, resolvePlace, startPlacesSession, endPlacesSession,
+} from '@/services/places';
+import { toast } from '@/stores/toastStore';
+import { useUserLocation } from '@/hooks/useUserLocation';
+import { distanceKm, formatDistance } from '@/lib/geo';
 import { queryKeys } from '@/lib/queryClient';
 import { MALAYSIA_CITIES } from '@/types';
 import type { RestaurantCategory, Restaurant, Dish, RestaurantDishEntry, AlgoliaRestaurant } from '@/types';
@@ -57,6 +63,7 @@ const DISH_CATEGORY_EMOJI: Record<string, string> = {
 // Curated iconic Malaysian dishes shown as "category" cards — tapping one opens
 // the top spots serving it (dish graph, with an Algolia/name fallback).
 const POPULAR_MY_DISHES: { name: string; emoji: string; gradient: [string, string] }[] = [
+  // Malaysian icons
   { name: 'Nasi Lemak', emoji: '🍚', gradient: ['#D94841', '#8B1E1E'] },
   { name: 'Char Kway Teow', emoji: '🍜', gradient: ['#E07B39', '#B4801F'] },
   { name: 'Roti Canai', emoji: '🫓', gradient: ['#C79A2E', '#8B6914'] },
@@ -65,14 +72,73 @@ const POPULAR_MY_DISHES: { name: string; emoji: string; gradient: [string, strin
   { name: 'Satay', emoji: '🍢', gradient: ['#B53535', '#7A1E1E'] },
   { name: 'Wan Tan Mee', emoji: '🍜', gradient: ['#374151', '#1F2937'] },
   { name: 'Chicken Rice', emoji: '🍗', gradient: ['#D9972A', '#A15A1B'] },
+  { name: 'Bak Kut Teh', emoji: '🍲', gradient: ['#5C4A1A', '#2E2410'] },
+  { name: 'Laksa', emoji: '🍜', gradient: ['#C2410C', '#7C2D12'] },
+  { name: 'Dim Sum', emoji: '🥟', gradient: ['#B91C1C', '#7A0E0E'] },
+  { name: 'Banana Leaf', emoji: '🍛', gradient: ['#4F8A5B', '#1F5C3A'] },
+  // Sweets & drinks
   { name: 'Cendol', emoji: '🍧', gradient: ['#4F8A5B', '#1F5C3A'] },
-  { name: 'Char Siew', emoji: '🥩', gradient: ['#BE185D', '#7A0E3E'] },
+  { name: 'Bingsu', emoji: '🍨', gradient: ['#60A5FA', '#2563EB'] },
+  { name: 'Desserts', emoji: '🍰', gradient: ['#EC4899', '#9D174D'] },
+  { name: 'Kopi', emoji: '☕', gradient: ['#7C4A1A', '#4A2E10'] },
+  { name: 'Bubble Tea', emoji: '🧋', gradient: ['#8B5E3C', '#5C3A1A'] },
+  // General / Western / Asian
+  { name: 'Burgers', emoji: '🍔', gradient: ['#B45309', '#7C2D12'] },
+  { name: 'Pizza', emoji: '🍕', gradient: ['#DC2626', '#991B1B'] },
+  { name: 'Pasta', emoji: '🍝', gradient: ['#D97706', '#92400E'] },
+  { name: 'Ramen', emoji: '🍥', gradient: ['#374151', '#1F2937'] },
+  { name: 'Sushi', emoji: '🍣', gradient: ['#0F766E', '#134E4A'] },
+  { name: 'Korean BBQ', emoji: '🥩', gradient: ['#BE185D', '#7A0E3E'] },
+  { name: 'Fried Chicken', emoji: '🍗', gradient: ['#D9972A', '#A15A1B'] },
+  { name: 'Steak', emoji: '🥩', gradient: ['#7F1D1D', '#450A0A'] },
+  { name: 'Brunch', emoji: '🥞', gradient: ['#CA8A04', '#854D0E'] },
 ];
 
 // ─── Types ────────────────────────────────────────────────────
 
 type ExploreTab = 'discover' | 'people';
 type DiscoverView = 'home' | 'category' | 'dish';
+type SortMode = 'near' | 'top';
+
+// Cap category/dish results so a big city doesn't render (or crash) hundreds of
+// cards — enough to browse, Beli "want-to-try" sized.
+const RESULT_LIMIT = 20;
+
+// An ordered result carries its distance label so the card can show it in Near-Me mode.
+interface OrderedResult {
+  restaurant: Restaurant;
+  distance: string | null;
+}
+
+// Shared ordering for BOTH category + dish results so the two feel identical:
+// Near-Me sorts by true distance (places without coords sink to the bottom, keeping
+// their popularity order); Top-Rated sorts by rating then review count. Sliced to 20.
+function orderRestaurants(
+  list: Restaurant[],
+  mode: SortMode,
+  coords: { lat: number; lng: number } | null,
+): OrderedResult[] {
+  const withDist = list.map(r => {
+    const km = coords && r.latitude != null && r.longitude != null
+      ? distanceKm(coords, { lat: r.latitude, lng: r.longitude })
+      : null;
+    return { restaurant: r, km, distance: formatDistance(coords, r.latitude, r.longitude) };
+  });
+
+  withDist.sort((a, b) => {
+    if (mode === 'near') {
+      if (a.km == null && b.km == null) return 0;
+      if (a.km == null) return 1;
+      if (b.km == null) return -1;
+      return a.km - b.km;
+    }
+    // Top Rated — general, DB-wide rating then review count as the tiebreak.
+    return (b.restaurant.overall_rating ?? 0) - (a.restaurant.overall_rating ?? 0)
+      || (b.restaurant.total_reviews ?? 0) - (a.restaurant.total_reviews ?? 0);
+  });
+
+  return withDist.slice(0, RESULT_LIMIT).map(({ restaurant, distance }) => ({ restaurant, distance }));
+}
 
 // ─── Main screen ──────────────────────────────────────────────
 
@@ -87,9 +153,12 @@ export default function ExploreScreen() {
   const [city, setCity] = useState(profile?.city ?? 'Kuala Lumpur');
   const [activeCat, setActiveCat] = useState<CategoryDef | null>(null);
   const [activeDish, setActiveDish] = useState<Dish | null>(null);
+  // Results sub-tab (Near Me default → Top Rated), shared across category + dish views.
+  const [sortMode, setSortMode] = useState<SortMode>('near');
 
   const [searchQ, setSearchQ] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const location = useUserLocation();
 
   const [peopleQ, setPeopleQ] = useState('');
   const [debouncedPeopleQ, setDebouncedPeopleQ] = useState('');
@@ -106,24 +175,33 @@ export default function ExploreScreen() {
   const openCategory = (cat: CategoryDef) => {
     setActiveCat(cat);
     setActiveDish(null);
+    setSortMode('near');
     setView('category');
+    location.request(); // so Near-Me can sort by distance immediately
   };
 
   const openDish = (dish: Dish) => {
     setActiveDish(dish);
     setActiveCat(null);
+    setSortMode('near');
     setView('dish');
+    location.request();
   };
 
-  // Resolve a dish by name (from banner pills / curated chips) → open its top spots.
+  // Open a dish's results in the dish grid (SAME layout as a category). If the
+  // dish isn't in the graph we open a synthetic dish — the dishRestaurants query
+  // falls back to a restaurant search, so the view is always consistent.
   const openDishByName = useCallback(async (name: string) => {
     const results = await searchDishes(name, 1).catch(() => []);
-    if (results.length > 0) {
-      setActiveDish(results[0]);
-      setActiveCat(null);
-      setView('dish');
-    }
-  }, []);
+    const dish = results.length > 0
+      ? results[0]
+      : ({ id: '', slug: name.toLowerCase().replace(/\s+/g, '-'), name } as Dish);
+    setActiveDish(dish);
+    setActiveCat(null);
+    setSortMode('near');
+    setView('dish');
+    location.request();
+  }, [location]);
 
   // Deep link from the home banner / dish chips: /explore?dishName=Teh%20Tarik
   useEffect(() => {
@@ -154,25 +232,22 @@ export default function ExploreScreen() {
     queryKey: ['dishRestaurants', activeDish?.id, activeDish?.name],
     queryFn: async () => {
       // 1) The dish graph (restaurant_dishes) is the canonical mapping.
-      const graph = await getTopRestaurantsForDish(activeDish!.id, 15);
-      if (graph.length > 0) return graph;
+      //    Skip it for synthetic (not-in-graph) dishes — go straight to search.
+      if (activeDish!.id) {
+        const graph = await getTopRestaurantsForDish(activeDish!.id, RESULT_LIMIT).catch(() => []);
+        if (graph.length > 0) return graph;
+      }
       // 2) Fallback so real restaurants still surface even before the graph is
-      //    populated: Algolia (indexes dish/tag/cuisine terms) → Postgres name.
+      //    populated: Algolia (indexes dish/tag/cuisine terms) → Postgres name,
+      //    then fetch FULL rows by id so the cards render exactly like categories.
       let hits: AlgoliaRestaurant[] = [];
       try {
-        const res = await searchRestaurants({ query: activeDish!.name, hitsPerPage: 15 });
+        const res = await searchRestaurants({ query: activeDish!.name, hitsPerPage: RESULT_LIMIT });
         hits = res.hits;
       } catch { /* Algolia unconfigured */ }
-      if (hits.length === 0) hits = await searchRestaurantsSupabase(activeDish!.name, { limit: 15 }).catch(() => []);
-      return hits.map(h => ({
-        id: h.objectID,
-        restaurant: {
-          id: h.objectID, slug: h.slug, name: h.name, category: h.category,
-          city: h.city, area: h.area, overall_rating: h.overall_rating, cover_photo_url: h.cover_photo_url,
-        },
-        average_rating: h.overall_rating ?? 0,
-        rating_count: 0,
-      })) as unknown as RestaurantDishEntry[];
+      if (hits.length === 0) hits = await searchRestaurantsSupabase(activeDish!.name, { limit: RESULT_LIMIT }).catch(() => []);
+      const full = await getRestaurantsByIds(hits.map(h => h.objectID)).catch(() => []);
+      return full.map(r => ({ id: r.id, restaurant: r, average_rating: 0, rating_count: 0 })) as unknown as RestaurantDishEntry[];
     },
     enabled: view === 'dish' && !!activeDish,
   });
@@ -189,11 +264,28 @@ export default function ExploreScreen() {
     enabled: !!profile && tab === 'people' && debouncedPeopleQ.length < 2,
   });
 
+  // Hybrid search: Rasa places + Google Places for restaurants, plus people.
+  // Pass the user's coords so Google biases nearer branches first (Beli-style).
+  const coords = location.coords;
   const { data: searchResults, isLoading: searchLoading } = useQuery({
-    queryKey: queryKeys.search(searchQ),
-    queryFn: () => multiSearch(searchQ),
+    queryKey: [...queryKeys.search(searchQ), coords?.lat, coords?.lng],
+    queryFn: async () => {
+      const [places, users] = await Promise.all([
+        searchPlaces(searchQ, coords ? { lat: coords.lat, lng: coords.lng } : {}),
+        searchUsers(searchQ, profile?.id).catch(() => []),
+      ]);
+      return { rasa: places.rasa, google: places.google, users };
+    },
     enabled: searchQ.length >= 2,
   });
+
+  // Unified, sorted results for category + dish views (Near Me / Top Rated, cap 20).
+  const orderedResults = React.useMemo(() => {
+    const raw: Restaurant[] = view === 'category'
+      ? (categoryRestaurants ?? [])
+      : ((dishRestaurants ?? []).map(e => e.restaurant).filter(Boolean) as Restaurant[]);
+    return orderRestaurants(raw, sortMode, coords ? { lat: coords.lat, lng: coords.lng } : null);
+  }, [view, categoryRestaurants, dishRestaurants, sortMode, coords]);
 
   const headerPad = Math.max(insets.top, 44);
 
@@ -228,7 +320,7 @@ export default function ExploreScreen() {
                   placeholderTextColor={colors.textTertiary}
                   value={searchQ}
                   onChangeText={setSearchQ}
-                  onFocus={() => setIsSearching(true)}
+                  onFocus={() => { setIsSearching(true); startPlacesSession(); location.request(); }}
                   returnKeyType="search"
                 />
                 {searchQ.length > 0 && (
@@ -238,7 +330,7 @@ export default function ExploreScreen() {
                 )}
               </TouchableOpacity>
               {isSearching && (
-                <TouchableOpacity onPress={() => { setIsSearching(false); setSearchQ(''); searchRef.current?.blur(); }}>
+                <TouchableOpacity onPress={() => { setIsSearching(false); setSearchQ(''); endPlacesSession(); searchRef.current?.blur(); }}>
                   <RText variant="bodyMedium" color={colors.primary} style={{ marginLeft: spacing[3] }}>
                     Cancel
                   </RText>
@@ -308,46 +400,26 @@ export default function ExploreScreen() {
                 ))}
               </ScrollView>
 
-              {/* Near me */}
+              {/* Recommendations — taste match + nearby */}
               <TouchableOpacity
                 style={styles.nearMeCard}
-                onPress={() => router.push('/nearby')}
+                onPress={() => router.push('/recommendations')}
                 activeOpacity={0.9}
               >
                 <View style={styles.nearMeIcon}>
-                  <Ionicons name="navigate" size={20} color={colors.white} />
+                  <Ionicons name="sparkles" size={20} color={colors.white} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <RText variant="titleMedium">Near Me</RText>
-                  <Caption color={colors.textSecondary}>Great food around you right now</Caption>
+                  <RText variant="titleMedium">Recommendations</RText>
+                  <Caption color={colors.textSecondary}>Picked for your taste — filter by distance too</Caption>
                 </View>
                 <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
               </TouchableOpacity>
 
-              {/* Craving something — curated Malaysian dishes */}
+              {/* Category grid — food categories AND iconic dishes together */}
               <View style={styles.sectionHeader}>
-                <RText variant="h4">Craving something?</RText>
-                <Caption color={colors.textSecondary}>Malaysian favourites</Caption>
-              </View>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cravingRow}>
-                {POPULAR_MY_DISHES.map(d => (
-                  <TouchableOpacity
-                    key={d.name}
-                    onPress={() => openDishByName(d.name)}
-                    activeOpacity={0.85}
-                  >
-                    <LinearGradient colors={d.gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.cravingCard}>
-                      <RText style={{ fontSize: 30, lineHeight: 36 }}>{d.emoji}</RText>
-                      <RText style={styles.cravingLabel} numberOfLines={2}>{d.name}</RText>
-                    </LinearGradient>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-
-              {/* Category grid */}
-              <View style={styles.sectionHeader}>
-                <RText variant="h4">By Category</RText>
-                <Caption color={colors.textSecondary}>in {city}</Caption>
+                <RText variant="h4">Browse</RText>
+                <Caption color={colors.textSecondary}>categories & dishes</Caption>
               </View>
               <View style={styles.categoryGrid}>
                 {FOOD_CATEGORIES.map(cat => (
@@ -363,6 +435,23 @@ export default function ExploreScreen() {
                     >
                       <RText style={{ fontSize: 36, lineHeight: 46 }}>{cat.emoji}</RText>
                       <RText style={styles.categoryLabel}>{cat.label}</RText>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                ))}
+                {/* Iconic Malaysian dishes as categories → open that dish's top spots */}
+                {POPULAR_MY_DISHES.map(d => (
+                  <TouchableOpacity
+                    key={d.name}
+                    style={styles.categoryCard}
+                    onPress={() => openDishByName(d.name)}
+                    activeOpacity={0.85}
+                  >
+                    <LinearGradient
+                      colors={d.gradient}
+                      style={styles.categoryGradient}
+                    >
+                      <RText style={{ fontSize: 36, lineHeight: 46 }}>{d.emoji}</RText>
+                      <RText style={styles.categoryLabel} numberOfLines={2}>{d.name}</RText>
                     </LinearGradient>
                   </TouchableOpacity>
                 ))}
@@ -402,14 +491,6 @@ export default function ExploreScreen() {
                         />
                         <View style={styles.dishCardOverlay}>
                           <RText style={styles.dishCardName} numberOfLines={2}>{dish.name}</RText>
-                          {dish.average_rating > 0 && (
-                            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
-                              <RText style={{ fontSize: 10, lineHeight: 14 }}>⭐</RText>
-                              <RText style={{ fontSize: 11, color: colors.white, fontWeight: '700', marginLeft: 2 }}>
-                                {dish.average_rating.toFixed(1)}
-                              </RText>
-                            </View>
-                          )}
                         </View>
                       </TouchableOpacity>
                     ))}
@@ -436,9 +517,11 @@ export default function ExploreScreen() {
                 ))}
               </ScrollView>
 
+              <SortTabs mode={sortMode} onChange={(m) => { setSortMode(m); if (m === 'near') location.request(); }} />
+
               {catLoading ? (
                 <ActivityIndicator color={colors.primary} style={{ marginTop: spacing[10] }} />
-              ) : (categoryRestaurants ?? []).length === 0 ? (
+              ) : orderedResults.length === 0 ? (
                 <View style={styles.emptyState}>
                   <RText style={{ fontSize: 40, lineHeight: 52 }}>{activeCat.emoji}</RText>
                   <RText variant="titleMedium" style={{ marginTop: spacing[4] }}>
@@ -450,9 +533,9 @@ export default function ExploreScreen() {
                 </View>
               ) : (
                 <View style={styles.restaurantGrid}>
-                  {(categoryRestaurants ?? []).map(r => (
-                    <View key={r.id} style={styles.restaurantGridItem}>
-                      <RestaurantCard restaurant={r} />
+                  {orderedResults.map(({ restaurant, distance }) => (
+                    <View key={restaurant.id} style={styles.restaurantGridItem}>
+                      <RestaurantCard restaurant={restaurant} distance={sortMode === 'near' ? distance : null} />
                     </View>
                   ))}
                 </View>
@@ -462,30 +545,26 @@ export default function ExploreScreen() {
 
           {view === 'dish' && activeDish && (
             <>
-              <Caption color={colors.textSecondary} style={{ paddingHorizontal: spacing[4], paddingTop: spacing[2], paddingBottom: spacing[4] }}>
-                Top spots serving {activeDish.name} · ranked by dish rating
-              </Caption>
+              <SortTabs mode={sortMode} onChange={(m) => { setSortMode(m); if (m === 'near') location.request(); }} />
 
               {dishLoading ? (
                 <ActivityIndicator color={colors.primary} style={{ marginTop: spacing[10] }} />
-              ) : (dishRestaurants ?? []).length === 0 ? (
+              ) : orderedResults.length === 0 ? (
                 <View style={styles.emptyState}>
                   <RText style={{ fontSize: 40, lineHeight: 52 }}>🍽️</RText>
                   <RText variant="titleMedium" style={{ marginTop: spacing[4] }}>
-                    No ratings for {activeDish.name} yet
+                    No {activeDish.name} spots yet
                   </RText>
                   <Caption color={colors.textSecondary} align="center" style={{ marginTop: spacing[2], maxWidth: 260 }}>
                     Rate this dish at a restaurant to get it started!
                   </Caption>
                 </View>
               ) : (
-                <View style={styles.dishHeroList}>
-                  {(dishRestaurants ?? []).map((entry, idx) => (
-                    <DishHeroCard
-                      key={entry.id}
-                      entry={entry}
-                      rank={idx + 1}
-                    />
+                <View style={styles.restaurantGrid}>
+                  {orderedResults.map(({ restaurant, distance }) => (
+                    <View key={restaurant.id} style={styles.restaurantGridItem}>
+                      <RestaurantCard restaurant={restaurant} distance={sortMode === 'near' ? distance : null} />
+                    </View>
                   ))}
                 </View>
               )}
@@ -536,25 +615,12 @@ function DishHeroCard({ entry, rank }: { entry: RestaurantDishEntry; rank: numbe
         )}
       </View>
 
-      {/* Bottom content */}
+      {/* Bottom content — no rating shown (avoids surfacing unrated/borrowed numbers) */}
       <View style={styles.dishHeroContent}>
-        <RText variant="h3" color={colors.white} numberOfLines={1}>{restaurant.name}</RText>
-        <View style={styles.dishHeroMeta}>
-          <View style={styles.dishHeroScore}>
-            <RText style={{ fontSize: 13, lineHeight: 17 }}>⭐</RText>
-            <RText style={{ fontSize: 15, fontWeight: '800', color: colors.white, marginLeft: 4 }}>
-              {score > 0 ? score.toFixed(1) : '—'}
-            </RText>
-            {entry.rating_count > 0 && (
-              <RText style={{ fontSize: 12, color: colors.whiteTransparent80, marginLeft: 4 }}>
-                ({entry.rating_count})
-              </RText>
-            )}
-          </View>
-          <RText variant="bodySmall" color={colors.whiteTransparent80} numberOfLines={1} style={{ flex: 1 }}>
-            {restaurant.area ?? restaurant.city} · {restaurant.category?.replace(/_/g, ' ')}
-          </RText>
-        </View>
+        <RText variant="h2" color={colors.white} numberOfLines={1}>{restaurant.name}</RText>
+        <RText variant="bodyMedium" color={colors.whiteTransparent80} numberOfLines={1} style={{ marginTop: 2 }}>
+          {restaurant.area ?? restaurant.city} · {restaurant.category?.replace(/_/g, ' ')}
+        </RText>
       </View>
     </TouchableOpacity>
   );
@@ -567,6 +633,36 @@ function restaurantDishEmojiKey(cat?: string): string {
     case 'night_market': case 'food_court': case 'hawker': return 'noodles';
     default: return 'other';
   }
+}
+
+// ─── Results sort sub-tabs (Near Me / Top Rated) ─────────────
+// Shared by category + dish results so both drill-downs feel identical.
+
+function SortTabs({ mode, onChange }: { mode: SortMode; onChange: (m: SortMode) => void }) {
+  const opts: { key: SortMode; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+    { key: 'near', label: 'Near Me', icon: 'navigate' },
+    { key: 'top', label: 'Top Rated', icon: 'star' },
+  ];
+  return (
+    <View style={styles.sortRow}>
+      {opts.map(o => {
+        const active = mode === o.key;
+        return (
+          <TouchableOpacity
+            key={o.key}
+            style={[styles.sortChip, active && styles.sortChipActive]}
+            onPress={() => onChange(o.key)}
+            activeOpacity={0.85}
+          >
+            <Ionicons name={o.icon} size={14} color={active ? colors.white : colors.textSecondary} />
+            <RText variant="labelMedium" color={active ? colors.white : colors.textSecondary} style={{ marginLeft: 6 }}>
+              {o.label}
+            </RText>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
 }
 
 // ─── People content ───────────────────────────────────────────
@@ -685,13 +781,34 @@ function GlobalSearchResults({
   isLoading: boolean;
   query: string;
 }) {
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
+
+  // Google result tapped → resolve to a canonical Rasa row, then open it.
+  const openGoogle = async (placeId: string, nameHint: string) => {
+    if (resolvingId) return;
+    setResolvingId(placeId);
+    try {
+      const r = await resolvePlace(placeId, nameHint);
+      if (r) router.push(`/restaurant/${r.objectID}`);
+      else toast.error('Could not open that place. Try again.');
+    } catch {
+      toast.error('Could not open that place. Try again.');
+    } finally {
+      setResolvingId(null);
+    }
+  };
+
   if (isLoading) return <ActivityIndicator color={colors.primary} style={{ marginTop: spacing[10] }} />;
   if (!results) return null;
 
-  const hasRestaurants = results.restaurants?.length > 0;
-  const hasUsers = results.users?.length > 0;
+  const rasa = results.rasa ?? [];
+  const google = results.google ?? [];
+  const users = results.users ?? [];
+  const hasRestaurants = rasa.length > 0;
+  const hasGoogle = google.length > 0;
+  const hasUsers = users.length > 0;
 
-  if (!hasRestaurants && !hasUsers) {
+  if (!hasRestaurants && !hasGoogle && !hasUsers) {
     return (
       <View style={styles.emptyState}>
         <RText style={{ fontSize: 40, lineHeight: 52 }}>🔍</RText>
@@ -706,28 +823,51 @@ function GlobalSearchResults({
   }
 
   return (
-    <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-      {hasRestaurants && (
+    <ScrollView
+      style={{ flex: 1 }}
+      contentContainerStyle={{ paddingBottom: 320 }}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
+      showsVerticalScrollIndicator={false}
+    >
+      {(hasRestaurants || hasGoogle) && (
         <View style={styles.searchSection}>
           <RText variant="labelSmall" color={colors.textTertiary} style={styles.searchSectionTitle}>
             RESTAURANTS
           </RText>
-          {results.restaurants.map((r: any) => (
+          {/* Rasa + Google rendered identically (Beli-style — no visible split) */}
+          {rasa.map((r: any) => (
             <TouchableOpacity
-              key={r.objectID}
+              key={r.id}
               style={styles.searchResultRow}
-              onPress={() => router.push(`/restaurant/${r.objectID}`)}
+              onPress={() => router.push(`/restaurant/${r.id}`)}
             >
               <View style={styles.searchResultIcon}>
                 <Ionicons name="restaurant" size={18} color={colors.primary} />
               </View>
               <View style={{ flex: 1 }}>
-                <RText variant="titleSmall">{r.name}</RText>
-                <Caption>{r.area ?? r.city} · {r.category}</Caption>
+                <RText variant="titleSmall" numberOfLines={1}>{r.name}</RText>
+                <Caption numberOfLines={1}>{r.area || r.city} · {r.category}</Caption>
               </View>
-              <RText variant="labelMedium" color={colors.textSecondary}>
-                ⭐ {r.overall_rating?.toFixed(1)}
-              </RText>
+            </TouchableOpacity>
+          ))}
+          {google.map((g: any) => (
+            <TouchableOpacity
+              key={g.placeId}
+              style={styles.searchResultRow}
+              onPress={() => openGoogle(g.placeId, g.name)}
+              disabled={!!resolvingId}
+            >
+              <View style={styles.searchResultIcon}>
+                <Ionicons name="restaurant" size={18} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <RText variant="titleSmall" numberOfLines={1}>{g.name}</RText>
+                {!!g.secondary && <Caption numberOfLines={1}>{g.secondary}</Caption>}
+              </View>
+              {resolvingId === g.placeId
+                ? <ActivityIndicator size="small" color={colors.primary} />
+                : null}
             </TouchableOpacity>
           ))}
         </View>
@@ -829,6 +969,29 @@ const styles = StyleSheet.create({
   },
   cityChipActive: {
     backgroundColor: colors.secondary,
+  },
+
+  // Near Me / Top Rated sub-tabs
+  sortRow: {
+    flexDirection: 'row',
+    gap: spacing[2],
+    paddingHorizontal: spacing[4],
+    paddingTop: spacing[2],
+    paddingBottom: spacing[3],
+  },
+  sortChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[2],
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  sortChipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
 
   // Section headers
@@ -966,7 +1129,7 @@ const styles = StyleSheet.create({
     gap: spacing[3],
   },
   dishHero: {
-    height: 172,
+    height: 240,
     borderRadius: radius.xl,
     overflow: 'hidden',
     backgroundColor: colors.gray100,
@@ -1055,11 +1218,21 @@ const styles = StyleSheet.create({
   searchResultRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing[3],
+    paddingVertical: spacing[4],
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
     gap: spacing[3],
   },
+  googleTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.gray100,
+    borderRadius: radius.full,
+    paddingHorizontal: spacing[2],
+    paddingVertical: 2,
+  },
+  rasaHeaderRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing[3], gap: spacing[2] },
+  rasaDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.primary },
   searchResultIcon: {
     width: 38,
     height: 38,

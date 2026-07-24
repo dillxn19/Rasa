@@ -12,11 +12,11 @@ import { RText, Caption } from '@/components/ui/Text';
 import { Avatar } from '@/components/ui/Avatar';
 import { useAuthStore } from '@/stores/authStore';
 import { useSettingsStore } from '@/stores/settingsStore';
-import { getLeaderboard, getFriendsLeaderboard } from '@/services/leaderboard';
+import { getLeaderboard, getFriendsLeaderboard, getSchoolLeaderboard } from '@/services/leaderboard';
 import { MALAYSIA_CITIES, TASTE_PROFILE_LABELS } from '@/types';
 import type { LeaderboardPeriod, LeaderboardEntry } from '@/services/leaderboard';
 
-type Scope = 'city' | 'friends';
+type Scope = 'city' | 'friends' | 'school';
 
 const PERIODS: { key: LeaderboardPeriod; label: string }[] = [
   { key: 'weekly', label: 'This Week' },
@@ -37,12 +37,14 @@ export default function LeaderboardScreen() {
   const [city, setCity] = useState(profile?.city ?? selectedCity ?? 'Kuala Lumpur');
   const [picker, setPicker] = useState<null | 'city' | 'period'>(null);
 
+  const school = profile?.school ?? null;
   const { data: entries = [], isLoading } = useQuery({
-    queryKey: ['leaderboard', scope, city, period, profile?.id],
-    queryFn: () =>
-      scope === 'friends' && profile
-        ? getFriendsLeaderboard(profile.id, period)
-        : getLeaderboard(city, period),
+    queryKey: ['leaderboard', scope, city, period, school, profile?.id],
+    queryFn: () => {
+      if (scope === 'friends' && profile) return getFriendsLeaderboard(profile.id, period);
+      if (scope === 'school') return school ? getSchoolLeaderboard(school, period) : Promise.resolve([]);
+      return getLeaderboard(city, period);
+    },
     staleTime: 1000 * 60 * 5,
   });
 
@@ -94,6 +96,20 @@ export default function LeaderboardScreen() {
             Friends
           </RText>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.scopeTab, scope === 'school' && styles.scopeTabActive]}
+          onPress={() => setScope('school')}
+        >
+          <Ionicons
+            name="school"
+            size={14}
+            color={scope === 'school' ? colors.white : colors.textSecondary}
+            style={{ marginRight: 4 }}
+          />
+          <RText variant="labelMedium" color={scope === 'school' ? colors.white : colors.textSecondary}>
+            School
+          </RText>
+        </TouchableOpacity>
       </View>
 
       {/* Dropdowns */}
@@ -115,6 +131,14 @@ export default function LeaderboardScreen() {
             </Caption>
           </View>
         )}
+        {scope === 'school' && school && (
+          <View style={styles.friendsHint}>
+            <Ionicons name="school-outline" size={14} color={colors.textSecondary} />
+            <Caption color={colors.textSecondary} style={{ marginLeft: spacing[2] }} numberOfLines={1}>
+              {school}
+            </Caption>
+          </View>
+        )}
         <TouchableOpacity style={styles.dropdown} onPress={showPeriodPicker}>
           <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
           <RText variant="labelMedium" color={colors.textPrimary} style={styles.dropdownText}>
@@ -124,7 +148,19 @@ export default function LeaderboardScreen() {
         </TouchableOpacity>
       </View>
 
-      {isLoading ? (
+      {scope === 'school' && !school ? (
+        <View style={styles.emptyState}>
+          <RText style={{ fontSize: 48, lineHeight: 58 }}>🎓</RText>
+          <RText variant="titleMedium" style={{ marginTop: spacing[3] }}>Join your campus board</RText>
+          <Caption color={colors.textSecondary} align="center" style={{ marginTop: spacing[2], maxWidth: 280 }}>
+            Add your school to see how you rank against fellow students and compete for the top spot.
+          </Caption>
+          <TouchableOpacity style={styles.addSchoolBtn} onPress={() => router.push('/edit-profile')} activeOpacity={0.9}>
+            <Ionicons name="school-outline" size={16} color={colors.white} />
+            <RText variant="labelMedium" color={colors.white} style={{ marginLeft: 6 }}>Add your school</RText>
+          </TouchableOpacity>
+        </View>
+      ) : isLoading ? (
         <View style={styles.loadingState}>
           <ActivityIndicator color={colors.primary} />
         </View>
@@ -132,12 +168,14 @@ export default function LeaderboardScreen() {
         <View style={styles.emptyState}>
           <RText style={{ fontSize: 48, lineHeight: 58 }}>🍽️</RText>
           <RText variant="titleMedium" style={{ marginTop: spacing[3] }}>
-            {scope === 'friends' ? 'No friends yet' : 'No reviewers yet'}
+            {scope === 'friends' ? 'No friends yet' : scope === 'school' ? 'No reviewers yet' : 'No reviewers yet'}
           </RText>
           <Caption color={colors.textSecondary} align="center" style={{ marginTop: spacing[2], maxWidth: 260 }}>
             {scope === 'friends'
               ? 'Follow food lovers to see how you compare!'
-              : `Be the first to review in ${city}!`}
+              : scope === 'school'
+                ? `Be the first at ${school} to review!`
+                : `Be the first to review in ${city}!`}
           </Caption>
         </View>
       ) : (
@@ -222,11 +260,6 @@ function LeaderboardRow({ entry, isCurrentUser }: { entry: LeaderboardEntry; isC
           <RText variant="titleSmall" numberOfLines={1} style={{ flex: 1 }}>
             {entry.display_name}
           </RText>
-          {isCurrentUser && (
-            <View style={styles.youBadge}>
-              <RText style={{ fontSize: 10, color: colors.primary, fontWeight: '800' }}>YOU</RText>
-            </View>
-          )}
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing[2] }}>
           <Caption color={colors.textTertiary}>@{entry.username}</Caption>
@@ -362,6 +395,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing[2],
   },
 
+  addSchoolBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: 999,
+    paddingHorizontal: spacing[5],
+    paddingVertical: spacing[3],
+    marginTop: spacing[5],
+  },
   loadingState: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   emptyState: {
     flex: 1,
@@ -391,10 +433,12 @@ const styles = StyleSheet.create({
   scoreBox: { alignItems: 'center', flexDirection: 'row' },
   youBadge: {
     paddingHorizontal: spacing[2],
-    paddingVertical: 2,
+    paddingVertical: 3,
     borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   myRankFooter: {

@@ -10,12 +10,18 @@ import { useAuthStore } from '@/stores/authStore';
 import { ToastHost } from '@/components/ui/Toast';
 import { ThemeProvider } from '@/theme/ThemeProvider';
 import { useReferralCapture } from '@/hooks/useReferralCapture';
+import { initAnalytics } from '@/lib/analytics';
+import { initMonitoring, wrapWithMonitoring } from '@/lib/monitoring';
 
-export default function RootLayout() {
+// Initialise crash reporting as early as possible (before first render).
+initMonitoring();
+
+function RootLayout() {
   const { initialize, isInitialized } = useAuthStore();
   useReferralCapture();
 
   useEffect(() => {
+    initAnalytics();
     initialize();
   }, []);
 
@@ -71,6 +77,9 @@ export default function RootLayout() {
                 animation: 'slide_from_right',
               }}
             />
+            <Stack.Screen name="list/new" options={{ presentation: 'modal' }} />
+            <Stack.Screen name="list/add" options={{ presentation: 'modal' }} />
+            <Stack.Screen name="list/share" options={{ presentation: 'modal' }} />
             <Stack.Screen
               name="dish/[id]"
               options={{
@@ -134,6 +143,22 @@ export default function RootLayout() {
                 animation: 'slide_from_right',
               }}
             />
+            <Stack.Screen
+              name="recommendations"
+              options={{ presentation: 'card', animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="referrals"
+              options={{ presentation: 'card', animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="legal/privacy"
+              options={{ presentation: 'card', animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
+              name="legal/terms"
+              options={{ presentation: 'card', animation: 'slide_from_right' }}
+            />
           </Stack>
           <ToastHost />
           </ThemeProvider>
@@ -146,3 +171,5 @@ export default function RootLayout() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
 });
+
+export default wrapWithMonitoring(RootLayout);

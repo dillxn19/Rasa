@@ -181,6 +181,10 @@ export interface DbUser {
   taste_score: number;
   is_verified: boolean;
   is_admin: boolean;
+  is_ambassador: boolean;
+  referral_code: string | null;
+  school: string | null;
+  school_updated_at: string | null;
   is_active: boolean;
   onboarding_completed: boolean;
   push_token: string | null;
@@ -225,6 +229,14 @@ export interface DbRestaurant {
   google_maps_url: string | null;
   waze_url: string | null;
   cover_photo_url: string | null;
+  // Google Places integration (migration 011)
+  google_place_id: string | null;
+  google_types: string[] | null;
+  google_rating: number | null;
+  google_rating_count: number | null;
+  price_level: number | null;
+  source: string | null;          // 'seed' | 'google'
+  last_synced_at: string | null;
   is_approved: boolean;
   is_active: boolean;
   is_claimed: boolean;
@@ -246,6 +258,7 @@ export interface DbReview {
   user_id: string;
   restaurant_id: string;
   rating: number;
+  rank_score: number | null;
   content: string | null;
   photos: string[];
   dishes_mentioned: string[];

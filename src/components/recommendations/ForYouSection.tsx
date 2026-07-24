@@ -78,11 +78,6 @@ export function RecommendationCard({ rec, onDismiss }: RecommendationCardProps) 
         </RText>
 
         <View style={styles.metaRow}>
-          <StarRating value={restaurant.overall_rating} size={13} readonly compact color={colors.accent} />
-          <Caption color="rgba(255,255,255,0.7)" style={{ marginLeft: spacing[2] }}>
-            {restaurant.overall_rating.toFixed(1)}
-          </Caption>
-          <Caption color="rgba(255,255,255,0.5)" style={{ marginHorizontal: spacing[2] }}>·</Caption>
           <Caption color="rgba(255,255,255,0.7)">
             {restaurant.area ?? restaurant.city}
           </Caption>
@@ -193,7 +188,7 @@ function TrendingCard({ restaurant }: { restaurant: Restaurant }) {
       <View style={styles.trendingContent}>
         <RText variant="titleSmall" color={colors.white} numberOfLines={1}>{restaurant.name}</RText>
         <View style={styles.trendingMeta}>
-          <Caption color="rgba(255,255,255,0.8)">⭐ {restaurant.overall_rating.toFixed(1)}</Caption>
+          <Caption color="rgba(255,255,255,0.8)">{restaurant.area ?? restaurant.city}</Caption>
           <Caption color="rgba(255,255,255,0.6)" style={{ marginLeft: spacing[2] }}>
             {restaurant.price_range}
           </Caption>

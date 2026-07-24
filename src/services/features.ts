@@ -88,6 +88,8 @@ export async function unlockWithCoins(
  */
 export function useFeatureAccess() {
   const uid = useAuthStore((s) => s.profile?.id);
+  // Ambassadors get full access to every gated feature.
+  const isAmbassador = useAuthStore((s) => !!s.profile?.is_ambassador);
 
   const { data: referralCount = 0 } = useQuery({
     queryKey: ['referralCount', uid],
@@ -104,11 +106,12 @@ export function useFeatureAccess() {
   });
 
   const isUnlocked = (featureId: string) => {
+    if (isAmbassador) return true;
     const f = FEATURES[featureId];
     if (!f) return true;
     if (unlocked.has(featureId)) return true;
     return referralCount >= f.referralsRequired;
   };
 
-  return { isUnlocked, referralCount, unlocked };
+  return { isUnlocked, referralCount, unlocked, isAmbassador };
 }

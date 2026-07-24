@@ -110,6 +110,12 @@ export interface ThemeDef {
   tier: 'color' | 'signature';
   /** Short note shown on signature cards, e.g. "Serif headings". */
   fontNote?: string;
+  /**
+   * When true the theme is previewed in the shop but cannot be equipped yet
+   * (locked "Coming soon" state). Used to park the signature/font themes until
+   * they justify a premium — the accent-only change isn't distinct enough yet.
+   */
+  comingSoon?: boolean;
   preview: {
     bg: string;
     surface: string;
@@ -136,7 +142,7 @@ export const SHOP_THEMES: ThemeDef[] = [
     id: 'pandan',
     name: 'Pandan',
     emoji: '🌿',
-    cost: 0,
+    cost: 150,
     tier: 'color',
     preview: { bg: '#F0FDF4', surface: '#FFFFFF', primary: '#16A34A', text: '#14532D' },
   },
@@ -144,7 +150,7 @@ export const SHOP_THEMES: ThemeDef[] = [
     id: 'modern_kl',
     name: 'Modern KL',
     emoji: '🏙️',
-    cost: 0,
+    cost: 150,
     tier: 'color',
     preview: { bg: '#F0F4FF', surface: '#FFFFFF', primary: '#3B82F6', text: '#0F172A' },
   },
@@ -155,6 +161,7 @@ export const SHOP_THEMES: ThemeDef[] = [
     cost: 0,
     tier: 'signature',
     fontNote: 'Serif headings',
+    comingSoon: true,
     preview: { bg: '#FDF6E3', surface: '#FFFBF0', primary: '#B4801F', text: '#3B2105' },
   },
   {
@@ -164,6 +171,7 @@ export const SHOP_THEMES: ThemeDef[] = [
     cost: 0,
     tier: 'signature',
     fontNote: 'Elegant serif',
+    comingSoon: true,
     preview: { bg: '#FFF1F6', surface: '#FFFFFF', primary: '#BE185D', text: '#831843' },
   },
   {
@@ -173,6 +181,7 @@ export const SHOP_THEMES: ThemeDef[] = [
     cost: 0,
     tier: 'signature',
     fontNote: 'Playful display',
+    comingSoon: true,
     preview: { bg: '#F5F0FF', surface: '#FFFFFF', primary: '#7C3AED', text: '#3B0764' },
   },
 ];
@@ -189,6 +198,9 @@ export async function purchaseTheme(
   userId: string,
   theme: ThemeDef,
 ): Promise<{ success: boolean; message: string; newBalance: number }> {
+  if (theme.comingSoon) {
+    return { success: false, message: 'This theme is coming soon.', newBalance: 0 };
+  }
   if (theme.cost === 0) {
     await setActiveTheme(userId, theme.id);
     return { success: true, message: 'Theme applied!', newBalance: 0 };
