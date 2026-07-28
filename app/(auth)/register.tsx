@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabase';
 import { colors, spacing, radius } from '@/theme';
 import { toast } from '@/stores/toastStore';
 import { getPendingReferrer, setPendingReferrer } from '@/lib/referral';
+import { getSignupGate, validateReferralCode } from '@/services/signup';
 import { Button } from '@/components/ui/Button';
 import { RText, H2, Body, Caption } from '@/components/ui/Text';
 
@@ -20,12 +21,15 @@ export default function RegisterScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [referrer, setReferrer] = useState<string | null>(null);
   const [refCode, setRefCode] = useState('');
+  // Invite-only gate (defaults on until we hear otherwise, so it fails closed).
+  const [gateOn, setGateOn] = useState(true);
 
   useEffect(() => {
     getPendingReferrer().then((r) => {
       setReferrer(r);
       if (r) setRefCode(r.toUpperCase());
     }).catch(() => {});
+    getSignupGate().then(setGateOn).catch(() => setGateOn(true));
   }, []);
 
   const handleRegister = async () => {
@@ -38,6 +42,22 @@ export default function RegisterScreen() {
       return;
     }
 
+    const ref = refCode.trim();
+    // Invite-only: block before creating the account if the code is missing/invalid.
+    if (gateOn) {
+      if (!ref) {
+        toast.error('Rasa is invite-only right now — enter a friend\'s referral code.');
+        return;
+      }
+      setIsLoading(true);
+      const valid = await validateReferralCode(ref).catch(() => false);
+      if (!valid) {
+        setIsLoading(false);
+        toast.error('That referral code isn\'t valid. Check it and try again.', 'Invalid code');
+        return;
+      }
+    }
+
     setIsLoading(true);
     try {
       const { error } = await supabase.auth.signUp({
@@ -48,8 +68,7 @@ export default function RegisterScreen() {
         },
       });
       if (error) throw error;
-      // Persist a typed/link referral code so onboarding records it after signup.
-      const ref = refCode.trim();
+      // Persist the typed/link referral code so onboarding records it after signup.
       if (ref) await setPendingReferrer(ref);
       router.replace('/(auth)/onboarding');
     } catch (error: unknown) {
@@ -148,7 +167,7 @@ export default function RegisterScreen() {
             {!referrer && (
               <View style={styles.field}>
                 <RText variant="labelMedium" color={colors.textSecondary} style={styles.label}>
-                  Referral code (optional)
+                  {gateOn ? 'Referral code' : 'Referral code (optional)'}
                 </RText>
                 <TextInput
                   style={styles.input}
@@ -161,6 +180,11 @@ export default function RegisterScreen() {
                   maxLength={10}
                   returnKeyType="done"
                 />
+                {gateOn && (
+                  <Caption color={colors.textTertiary}>
+                    Rasa is invite-only right now — enter a friend's code to join.
+                  </Caption>
+                )}
               </View>
             )}
 

@@ -23,8 +23,9 @@ import { Button } from '@/components/ui/Button';
 import { RText, H2, Body, Caption } from '@/components/ui/Text';
 import { useAuthStore } from '@/stores/authStore';
 import { supabase } from '@/lib/supabase';
-import { getPendingReferrer, clearPendingReferrer } from '@/lib/referral';
+import { getPendingReferrer, clearPendingReferrer, setPendingReferrer } from '@/lib/referral';
 import { recordReferral, activateReferral } from '@/services/referrals';
+import { getSignupGate, validateReferralCode } from '@/services/signup';
 import { track } from '@/lib/analytics';
 import { getOnboardingSeedRestaurants, submitReview } from '@/services/restaurants';
 import { StarRating } from '@/components/ui/StarRating';
@@ -67,6 +68,19 @@ export default function OnboardingScreen() {
   const [seedLoading, setSeedLoading] = useState(false);
   const [seedRatings, setSeedRatings] = useState<Record<string, number>>({});
   const seedCount = Object.keys(seedRatings).length;
+
+  // Invite-only catch-all: covers Google/OAuth new users (who never hit the
+  // register screen). null = still checking; true = must enter a code to proceed.
+  const [needsGate, setNeedsGate] = useState<boolean | null>(null);
+  useEffect(() => {
+    (async () => {
+      const gateOn = await getSignupGate().catch(() => true);
+      if (!gateOn) { setNeedsGate(false); return; }
+      const pending = await getPendingReferrer().catch(() => null);
+      const ok = pending ? await validateReferralCode(pending).catch(() => false) : false;
+      setNeedsGate(!ok);
+    })();
+  }, []);
 
   const progress = useSharedValue(0);
 
@@ -214,6 +228,14 @@ export default function OnboardingScreen() {
     seedCount >= MIN_SEED_RATINGS || (!seedLoading && seedRestaurants.length === 0),
   ];
 
+  // Invite-only gate — block onboarding until a valid code is entered.
+  if (needsGate === null) {
+    return <View style={[styles.container, styles.gateCenter]} />;
+  }
+  if (needsGate) {
+    return <ReferralGate onPass={async (code) => { await setPendingReferrer(code); setNeedsGate(false); }} />;
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Progress bar */}
@@ -266,6 +288,49 @@ export default function OnboardingScreen() {
             isDisabled={!canProceed[step]}
           />
         )}
+      </View>
+    </SafeAreaView>
+  );
+}
+
+// Invite-only gate shown before onboarding when a valid referral code is missing.
+function ReferralGate({ onPass }: { onPass: (code: string) => void | Promise<void> }) {
+  const [code, setCode] = useState('');
+  const [checking, setChecking] = useState(false);
+
+  const submit = async () => {
+    const c = code.trim();
+    if (!c) { toast.error('Enter your invite code to continue.'); return; }
+    setChecking(true);
+    const valid = await validateReferralCode(c).catch(() => false);
+    setChecking(false);
+    if (!valid) { toast.error("That code isn't valid. Check it and try again.", 'Invalid code'); return; }
+    await onPass(c.toUpperCase());
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.gateWrap}>
+        <View style={styles.gateBadge}><RText style={{ fontSize: 32, lineHeight: 40 }}>🎟️</RText></View>
+        <H2 style={{ marginTop: spacing[5], textAlign: 'center' }}>You're almost in</H2>
+        <Body color={colors.textSecondary} style={{ textAlign: 'center', marginTop: spacing[2], maxWidth: 300 }}>
+          Rasa is invite-only right now. Enter a friend's referral code to join.
+        </Body>
+        <TextInput
+          style={styles.gateInput}
+          value={code}
+          onChangeText={(t) => setCode(t.toUpperCase())}
+          placeholder="e.g. MK7Q27"
+          placeholderTextColor={colors.textTertiary}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          maxLength={10}
+          returnKeyType="done"
+          onSubmitEditing={submit}
+        />
+        <View style={{ width: '100%', marginTop: spacing[4] }}>
+          <Button label="Continue" onPress={submit} fullWidth size="lg" isLoading={checking} />
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -539,6 +604,32 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  gateCenter: { alignItems: 'center', justifyContent: 'center' },
+  gateWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing[6],
+  },
+  gateBadge: {
+    width: 72, height: 72, borderRadius: 36,
+    backgroundColor: colors.primarySurface,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  gateInput: {
+    width: '100%',
+    marginTop: spacing[6],
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.xl,
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[4],
+    fontSize: 18,
+    letterSpacing: 2,
+    textAlign: 'center',
+    color: colors.textPrimary,
+    backgroundColor: colors.gray50,
   },
   seedProgress: {
     alignSelf: 'flex-start',
