@@ -18,7 +18,7 @@ import { RText, H3, Body, Caption } from '@/components/ui/Text';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { TasteMatchBadge } from '@/components/users/TasteMatchBadge';
-import { ReviewCard } from '@/components/profile/ReviewCard';
+import { ReviewPostCard, type ReviewPost } from '@/components/reviews/ReviewPostCard';
 import { SavedRestaurantCard } from '@/components/profile/SavedRestaurantCard';
 import { useAuthStore } from '@/stores/authStore';
 import { getUserByUsername, getUserReviews, followUser, unfollowUser } from '@/services/users';
@@ -319,10 +319,35 @@ export default function UserProfileScreen() {
                 </Caption>
               </View>
             ) : (
-              <View style={styles.reviewsList}>
-                {filteredReviews.map(review => (
-                  <ReviewCard key={review.id} review={review} />
-                ))}
+              <View style={styles.feedList}>
+                {filteredReviews.map((review, i) => {
+                  const r = review.restaurant as any;
+                  const post: ReviewPost = {
+                    reviewId: review.id,
+                    rating: review.rating,
+                    content: review.content,
+                    photos: (review.photos ?? []) as string[],
+                    createdAt: review.created_at,
+                    likeCount: review.like_count ?? 0,
+                    commentCount: review.comment_count ?? 0,
+                    isLiked: review.is_liked ?? false,
+                    restaurant: r
+                      ? { id: r.id, name: r.name, slug: r.slug ?? null, category: r.category, area: r.area, city: r.city }
+                      : null,
+                    actor: {
+                      id: user.id,
+                      username: user.username,
+                      display_name: user.display_name,
+                      avatar_url: user.avatar_url,
+                    },
+                  };
+                  return (
+                    <View key={review.id}>
+                      <ReviewPostCard post={post} variant="feed" showActor={false} />
+                      {i < filteredReviews.length - 1 && <View style={styles.feedSeparator} />}
+                    </View>
+                  );
+                })}
               </View>
             )}
           </View>
@@ -547,5 +572,7 @@ const styles = StyleSheet.create({
 
   // Review + saved lists
   reviewsList: { paddingHorizontal: spacing[4], paddingTop: spacing[2], gap: spacing[3] },
+  feedList: { paddingTop: spacing[2] },
+  feedSeparator: { height: 8, backgroundColor: colors.backgroundSecondary },
   savedList: { paddingHorizontal: spacing[4], paddingTop: spacing[2], gap: spacing[3] },
 });

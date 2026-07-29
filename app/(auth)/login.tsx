@@ -30,16 +30,23 @@ export default function LoginScreen() {
     }
 
     setIsLoading(true);
+    const emailNorm = email.trim().toLowerCase();
     try {
       const { error } = await supabase.auth.signInWithPassword({
-        email: email.trim().toLowerCase(),
+        email: emailNorm,
         password,
       });
 
       if (error) throw error;
       router.replace('/(tabs)');
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'Please try again.', 'Login failed');
+      const msg = error instanceof Error ? error.message : 'Please try again.';
+      // Supabase blocks sign-in until the email is confirmed → send them to verify.
+      if (/email not confirmed|not confirmed/i.test(msg)) {
+        router.replace({ pathname: '/(auth)/verify-email', params: { email: emailNorm } });
+        return;
+      }
+      toast.error(msg, 'Login failed');
     } finally {
       setIsLoading(false);
     }

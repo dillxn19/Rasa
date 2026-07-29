@@ -11,6 +11,13 @@ export async function getSignupGate(): Promise<boolean> {
   return data === true;
 }
 
+/** Generic app flag reader (app_config). Returns `fallback` on error/missing. */
+export async function getAppFlag(key: string, fallback: boolean): Promise<boolean> {
+  const { data, error } = await supabase.rpc('app_flag', { p_key: key, p_default: fallback });
+  if (error || data == null) return fallback;
+  return data === true;
+}
+
 /** True if the code matches a real referral code or an existing username. */
 export async function validateReferralCode(code: string): Promise<boolean> {
   const c = code.trim();

@@ -193,6 +193,7 @@ const styles = StyleSheet.create({
   tagRow: {
     flexDirection: 'row',
     gap: spacing[2],
+    paddingLeft: spacing[4],
     paddingRight: spacing[4],
   },
   selectorGrid: {

@@ -1,4 +1,4 @@
-import { Share } from 'react-native';
+import { Share, InteractionManager } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Linking from 'expo-linking';
@@ -15,18 +15,24 @@ export function buildInviteLink(ref: string): string {
   return `${WEB_BASE}/join?ref=${encodeURIComponent(ref)}`;
 }
 
-/** Opens the native share sheet with the user's personal invite link + code. */
-export async function shareInvite(ref: string): Promise<void> {
+/**
+ * Opens the native share sheet with the user's personal invite link + code.
+ *
+ * The share sheet is presented AFTER interactions settle (and a short buffer),
+ * because callers invoke this right as a modal (settings sheet, feature-gate
+ * popup, etc.) is dismissing — presenting the OS share sheet over a modal that's
+ * still mid-transition deadlocks/crashes on iOS. Deferring here keeps every
+ * caller safe without each one having to time it.
+ */
+export function shareInvite(ref: string): void {
   const link = buildInviteLink(ref);
   const message =
-    `Come eat with me on Rasa 🍜 — Malaysia's food discovery app.\n` +
-    `Follow my reviews and find your next makan.\n` +
+    `Join Rasa 🍜 — a food social app for Malaysia (think Beli, but for our makan).\n` +
+    `Rate places, follow friends and find your next meal.\n` +
     `Use my code ${ref.toUpperCase()} or tap:\n${link}`;
-  try {
-    await Share.share({ message });
-  } catch {
-    /* dismissed */
-  }
+  InteractionManager.runAfterInteractions(() => {
+    setTimeout(() => { Share.share({ message }).catch(() => {}); }, 250);
+  });
 }
 
 /** Copy the referral code to the clipboard. */

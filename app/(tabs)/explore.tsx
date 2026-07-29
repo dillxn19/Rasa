@@ -20,9 +20,14 @@ import { getDiscoverUsers, followUser, unfollowUser, searchUsers } from '@/servi
 import { getFeaturedDishes, getTopRestaurantsForDish, searchDishes } from '@/services/dishes';
 import { searchRestaurants } from '@/lib/algolia';
 import {
-  searchPlaces, resolvePlace, startPlacesSession, endPlacesSession,
+  searchPlaces, resolvePlace, startPlacesSession, endPlacesSession, browseGoogle,
 } from '@/services/places';
+import { getAppFlag } from '@/services/signup';
+import { useSettingsStore, saveUserHalal } from '@/stores/settingsStore';
+import { isHalalFriendly } from '@/lib/halal';
+import { bayesianScore } from '@/lib/ranking';
 import { toast } from '@/stores/toastStore';
+import * as Haptics from 'expo-haptics';
 import { useUserLocation } from '@/hooks/useUserLocation';
 import { distanceKm, formatDistance } from '@/lib/geo';
 import { queryKeys } from '@/lib/queryClient';
@@ -110,6 +115,14 @@ interface OrderedResult {
   distance: string | null;
 }
 
+// Shared Bayesian weighted "Top Rated" score (see src/lib/ranking.ts) — used by
+// Explore's Top Rated AND home Trending so quality signals are consistent.
+// Wrapped in a hoisted function (not a top-level const alias) so the imported
+// binding is resolved at call time, avoiding module-init ordering issues.
+function topScore(r: Restaurant): number {
+  return bayesianScore(r);
+}
+
 // Shared ordering for BOTH category + dish results so the two feel identical:
 // Near-Me sorts by true distance (places without coords sink to the bottom, keeping
 // their popularity order); Top-Rated sorts by rating then review count. Sliced to 20.
@@ -132,9 +145,9 @@ function orderRestaurants(
       if (b.km == null) return -1;
       return a.km - b.km;
     }
-    // Top Rated — general, DB-wide rating then review count as the tiebreak.
-    return (b.restaurant.overall_rating ?? 0) - (a.restaurant.overall_rating ?? 0)
-      || (b.restaurant.total_reviews ?? 0) - (a.restaurant.total_reviews ?? 0);
+    // Top Rated — Bayesian weighted score (high rating + enough reviews),
+    // Rasa data first, Google as the cold-start fallback.
+    return topScore(b.restaurant) - topScore(a.restaurant);
   });
 
   return withDist.slice(0, RESULT_LIMIT).map(({ restaurant, distance }) => ({ restaurant, distance }));
@@ -147,6 +160,13 @@ export default function ExploreScreen() {
   const insets = useSafeAreaInsets();
   const theme = useTheme();
   const { dishName } = useLocalSearchParams<{ dishName?: string }>();
+  const { halalOnly, toggleHalalOnly } = useSettingsStore();
+
+  const handleHalalToggle = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    toggleHalalOnly();
+    if (profile) saveUserHalal(profile.id, !halalOnly);
+  };
 
   const [tab, setTab] = useState<ExploreTab>('discover');
   const [view, setView] = useState<DiscoverView>('home');
@@ -223,9 +243,34 @@ export default function ExploreScreen() {
   });
 
   const { data: categoryRestaurants, isLoading: catLoading } = useQuery({
-    queryKey: ['catRestaurants', city, activeCat?.key],
-    queryFn: () => getRestaurantsByCategory(city, activeCat!.key),
+    // sortMode in the key → switching to Top Rated re-queries for the best-rated
+    // spots (not just a client re-sort of the nearby set).
+    queryKey: ['catRestaurants', city, activeCat?.key, sortMode, halalOnly],
+    queryFn: () => getRestaurantsByCategory(city, activeCat!.key, 50, sortMode === 'top' ? 'top' : 'popular', halalOnly),
     enabled: view === 'category' && !!activeCat,
+  });
+
+  // Early-stage gap-filler: while `explore_google_fill` is on, EVERY category
+  // browse also pulls real places from Google (Near Me + Top Rated both benefit) —
+  // not only when Rasa is sparse — so early explore looks Beli-full, not DB-limited.
+  // Flip the flag off (no app rebuild) once the DB is rich. One call per
+  // category+city per session (cached). Upserts also progressively stock the DB.
+  const { data: googleFill = true } = useQuery({
+    queryKey: ['appFlag', 'explore_google_fill'],
+    queryFn: () => getAppFlag('explore_google_fill', true),
+    staleTime: Infinity,
+  });
+  const { data: googleSupplement, isFetching: googleFetching } = useQuery({
+    queryKey: ['exploreGoogle', view, city, activeCat?.key, activeDish?.name],
+    queryFn: () => browseGoogle({
+      ...(view === 'dish' ? { dish: activeDish!.name } : { category: activeCat!.key }),
+      city,
+      lat: location.coords?.lat, lng: location.coords?.lng,
+    }),
+    enabled: googleFill && (
+      (view === 'category' && !!activeCat) || (view === 'dish' && !!activeDish)
+    ),
+    staleTime: 1000 * 60 * 30,
   });
 
   const { data: dishRestaurants, isLoading: dishLoading } = useQuery({
@@ -281,11 +326,21 @@ export default function ExploreScreen() {
 
   // Unified, sorted results for category + dish views (Near Me / Top Rated, cap 20).
   const orderedResults = React.useMemo(() => {
-    const raw: Restaurant[] = view === 'category'
+    let raw: Restaurant[] = view === 'category'
       ? (categoryRestaurants ?? [])
       : ((dishRestaurants ?? []).map(e => e.restaurant).filter(Boolean) as Restaurant[]);
+    // Merge in the Google gap-filler (category + dish views), deduped by id.
+    if ((googleSupplement?.length ?? 0) > 0) {
+      const byId = new Map(raw.map(r => [r.id, r]));
+      for (const g of googleSupplement!) if (!byId.has(g.id)) byId.set(g.id, g);
+      raw = Array.from(byId.values());
+    }
+    // Halal filter (certified OR muslim-friendly) applied to the full merged set —
+    // covers dish results and Google-filled places the category query can't filter
+    // server-side, so a halal user's Explore matches the rest of the app.
+    if (halalOnly) raw = raw.filter(r => isHalalFriendly(r.dietary_options));
     return orderRestaurants(raw, sortMode, coords ? { lat: coords.lat, lng: coords.lng } : null);
-  }, [view, categoryRestaurants, dishRestaurants, sortMode, coords]);
+  }, [view, categoryRestaurants, dishRestaurants, googleSupplement, sortMode, coords, halalOnly]);
 
   const headerPad = Math.max(insets.top, 44);
 
@@ -517,9 +572,9 @@ export default function ExploreScreen() {
                 ))}
               </ScrollView>
 
-              <SortTabs mode={sortMode} onChange={(m) => { setSortMode(m); if (m === 'near') location.request(); }} />
+              <SortTabs mode={sortMode} onChange={(m) => { setSortMode(m); if (m === 'near') location.request(); }} halalOnly={halalOnly} onToggleHalal={handleHalalToggle} />
 
-              {catLoading ? (
+              {catLoading || (orderedResults.length === 0 && googleFetching) ? (
                 <ActivityIndicator color={colors.primary} style={{ marginTop: spacing[10] }} />
               ) : orderedResults.length === 0 ? (
                 <View style={styles.emptyState}>
@@ -545,9 +600,9 @@ export default function ExploreScreen() {
 
           {view === 'dish' && activeDish && (
             <>
-              <SortTabs mode={sortMode} onChange={(m) => { setSortMode(m); if (m === 'near') location.request(); }} />
+              <SortTabs mode={sortMode} onChange={(m) => { setSortMode(m); if (m === 'near') location.request(); }} halalOnly={halalOnly} onToggleHalal={handleHalalToggle} />
 
-              {dishLoading ? (
+              {dishLoading || (orderedResults.length === 0 && googleFetching) ? (
                 <ActivityIndicator color={colors.primary} style={{ marginTop: spacing[10] }} />
               ) : orderedResults.length === 0 ? (
                 <View style={styles.emptyState}>
@@ -638,7 +693,10 @@ function restaurantDishEmojiKey(cat?: string): string {
 // ─── Results sort sub-tabs (Near Me / Top Rated) ─────────────
 // Shared by category + dish results so both drill-downs feel identical.
 
-function SortTabs({ mode, onChange }: { mode: SortMode; onChange: (m: SortMode) => void }) {
+function SortTabs({ mode, onChange, halalOnly, onToggleHalal }: {
+  mode: SortMode; onChange: (m: SortMode) => void;
+  halalOnly: boolean; onToggleHalal: () => void;
+}) {
   const opts: { key: SortMode; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
     { key: 'near', label: 'Near Me', icon: 'navigate' },
     { key: 'top', label: 'Top Rated', icon: 'star' },
@@ -661,6 +719,17 @@ function SortTabs({ mode, onChange }: { mode: SortMode; onChange: (m: SortMode) 
           </TouchableOpacity>
         );
       })}
+      <View style={{ flex: 1 }} />
+      {/* Halal filter — mirrors the global setting so Explore matches Home/Nearby */}
+      <TouchableOpacity
+        style={[styles.halalChip, halalOnly && styles.halalChipActive]}
+        onPress={onToggleHalal}
+        activeOpacity={0.85}
+      >
+        <RText variant="labelMedium" color={halalOnly ? colors.white : colors.halal} style={{ fontWeight: '800' }}>
+          ☪ Halal
+        </RText>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -992,6 +1061,20 @@ const styles = StyleSheet.create({
   sortChipActive: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
+  },
+  halalChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.halal,
+    backgroundColor: colors.halalBg,
+  },
+  halalChipActive: {
+    backgroundColor: colors.halal,
+    borderColor: colors.halal,
   },
 
   // Section headers

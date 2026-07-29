@@ -332,6 +332,60 @@ export async function updateReviewStreak(userId: string): Promise<StreakResult> 
   return { weeks: newStreak, newWeek: true, milestone };
 }
 
+/** Coin cost to revive a broken streak — scales with its length, capped. */
+export function streakRepairCost(weeks: number): number {
+  return Math.min(300, 50 + Math.max(0, weeks) * 25);
+}
+
+/** Whether a streak is broken (missed the 7-day window) and worth repairing. */
+export function isStreakBroken(streakDays: number, lastActivityDate: string | null): boolean {
+  if ((streakDays ?? 0) <= 0 || !lastActivityDate) return false;
+  const days = Math.floor((Date.now() - new Date(lastActivityDate).getTime()) / (1000 * 60 * 60 * 24));
+  return days >= 7;
+}
+
+export interface StreakRepairResult {
+  success: boolean;
+  message: string;
+  weeks?: number;
+  newBalance?: number;
+}
+
+/**
+ * Spend coins to revive a broken weekly streak so the NEXT review continues it
+ * (week N+1) instead of resetting to week 1. Only valid when the streak is
+ * genuinely broken. Resets the streak clock to today but keeps its length.
+ */
+export async function repairStreak(userId: string): Promise<StreakRepairResult> {
+  const { data: passport } = await supabase
+    .from('food_passports')
+    .select('streak_days, last_activity_date')
+    .eq('user_id', userId)
+    .single();
+  if (!passport) return { success: false, message: 'No streak to repair yet.' };
+
+  const weeks = (passport.streak_days as number | null) ?? 0;
+  const lastStr = passport.last_activity_date as string | null;
+  if (!isStreakBroken(weeks, lastStr)) {
+    return { success: false, message: 'Your streak is still active — nothing to repair.' };
+  }
+
+  const cost = streakRepairCost(weeks);
+  const { spendCoins } = await import('./coins');
+  const spend = await spendCoins(userId, cost, 'streak_repair', `Repaired ${weeks}-week streak`);
+  if (!spend.success) {
+    return { success: false, message: `Not enough coins — you need ${cost} 🪙 to repair.`, newBalance: spend.newBalance };
+  }
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  await supabase
+    .from('food_passports')
+    .update({ last_activity_date: todayStr, streak_week_start: todayStr, updated_at: new Date().toISOString() })
+    .eq('user_id', userId);
+
+  return { success: true, message: `Streak revived — you're back to week ${weeks}! 🔥`, weeks, newBalance: spend.newBalance };
+}
+
 export async function updatePushToken(userId: string, token: string): Promise<void> {
   await supabase
     .from('users')

@@ -32,6 +32,35 @@ export function mapCategory(primaryType: string | undefined, types: string[] = [
   return 'restaurant';
 }
 
+// ─── Halal / dietary inference (TRUST-CRITICAL, deliberately conservative) ────
+// Google exposes NO reliable halal field, so we must never claim "halal_certified"
+// from Google data — a false halal badge is a serious trust breach. We only assert
+// the softer "muslim_friendly" on a STRONG signal (an explicit "halal" mention or
+// a mamak, which in Malaysia is Indian-Muslim and conventionally halal), and we
+// suppress any claim when there are clear non-halal signals (pork, BKT, bar, etc.).
+export function mapDietary(
+  name = '', category = '', editorial = '', types: string[] = [],
+): string[] {
+  const hay = `${name} ${editorial} ${types.join(' ')}`.toLowerCase();
+
+  // Hard non-halal signals → never claim muslim-friendly.
+  const nonHalal =
+    /\b(pork|bak\s*kut\s*teh|bakkutteh|char\s*siu|siew?\s*yuk|non[-\s]?halal|not\s+halal|bbq\s*pork|pork\s*ribs)\b/.test(hay) ||
+    /\b(bar|pub|brewery|brewpub|wine|liquor|beer|cocktail|whisky|izakaya)\b/.test(hay) ||
+    category === 'bar' ||
+    types.includes('bar') || types.includes('pub') || types.includes('liquor_store');
+  if (nonHalal) return [];
+
+  // Explicit self-declared halal in the name/editorial is the most reliable signal.
+  if (/\bhalal\b/.test(hay) || /muslim[-\s]?friendly/.test(hay)) return ['muslim_friendly'];
+
+  // Mamak = Indian-Muslim; conventionally muslim-friendly in Malaysia.
+  if (category === 'mamak') return ['muslim_friendly'];
+
+  // Otherwise: make NO halal claim (safer to under-claim than to mislead).
+  return [];
+}
+
 // ─── Google cuisine types → Rasa cuisine_type[] ───────────────────────────────
 const CUISINE_BY_TYPE: Record<string, string> = {
   chinese_restaurant: 'chinese',

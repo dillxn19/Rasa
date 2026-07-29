@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -19,11 +19,13 @@ import { getProfileTheme } from '@/theme/profileThemes';
 import { RText, Caption, H2, Body } from '@/components/ui/Text';
 import { Avatar } from '@/components/ui/Avatar';
 import { useAuthStore } from '@/stores/authStore';
-import { getUserBadges, getUserPassport, getUserReviews, getUserLists, getTasteMatches } from '@/services/users';
+import { supabase } from '@/lib/supabase';
+import { getUserBadges, getUserPassport, getUserReviews, getUserLists, getTasteMatches, repairStreak, streakRepairCost, isStreakBroken } from '@/services/users';
 import { getSavedRestaurants, deleteReview } from '@/services/restaurants';
 import { getUserSavedDishes } from '@/services/dishes';
 import { getUserCoins } from '@/services/coins';
-import { useFeatureAccess, unlockWithCoins, FEATURES, type FeatureDef } from '@/services/features';
+import { getRecapWindow } from '@/services/recap';
+import { useFeatureAccess, unlockWithCoins, unlockWithReferral, FEATURES, type FeatureDef } from '@/services/features';
 import { getReferralStats } from '@/services/referrals';
 import { shareInvite, copyReferralCode } from '@/lib/referral';
 import { track } from '@/lib/analytics';
@@ -39,7 +41,8 @@ import type { Review, Badge, List } from '@/types';
 import { RestaurantCard } from '@/components/restaurants/RestaurantCard';
 import { DishChip } from '@/components/dishes/DishCard';
 import { TasteMatchCard } from '@/components/users/TasteMatchBadge';
-import { ScoreBadge, ReviewCard } from '@/components/profile/ReviewCard';
+import { ScoreBadge } from '@/components/profile/ReviewCard';
+import { ReviewPostCard, type ReviewPost } from '@/components/reviews/ReviewPostCard';
 import { SavedRestaurantCard } from '@/components/profile/SavedRestaurantCard';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -70,7 +73,7 @@ export default function ProfileScreen() {
   );
 
   const [showSettings, setShowSettings] = useState(false);
-  const { isUnlocked, referralCount } = useFeatureAccess();
+  const { isUnlocked, referralCredits } = useFeatureAccess();
   const [gate, setGate] = useState<FeatureDef | null>(null);
 
   const { data: referralStats } = useQuery({
@@ -83,7 +86,12 @@ export default function ProfileScreen() {
   // Prefer the stable referral code; fall back to username for old links.
   const inviteRef = profile?.referral_code ?? profile?.username;
   const handleInvite = () => {
-    if (inviteRef) { shareInvite(inviteRef); track('referral_shared'); }
+    if (!inviteRef) return;
+    // Close the sheet first; shareInvite defers the OS share sheet until after
+    // the modal dismissal settles (presenting over a dismissing modal crashes iOS).
+    setShowSettings(false);
+    shareInvite(inviteRef);
+    track('referral_shared');
   };
   const handleCopyCode = async () => {
     if (!profile?.referral_code) return;
@@ -118,10 +126,64 @@ export default function ProfileScreen() {
       toast.error(result.message);
     }
   };
+
+  const handleUnlockWithReferral = async (feature: FeatureDef) => {
+    const uid = useAuthStore.getState().profile?.id;
+    if (!uid) return;
+    const result = await unlockWithReferral(uid, feature);
+    if (result.success) {
+      qc.invalidateQueries({ queryKey: ['featureUnlocks', uid] });
+      qc.invalidateQueries({ queryKey: ['referralUnlockCount', uid] });
+      toast.success(result.message);
+      setGate(null);
+    } else {
+      toast.error(result.message);
+    }
+  };
   const handleSignOut = async () => {
     setShowSettings(false);
     await signOut();
     router.replace('/(auth)/welcome');
+  };
+
+  const [showPassport, setShowPassport] = useState(false);
+  const [showRepairConfirm, setShowRepairConfirm] = useState(false);
+  const [repairing, setRepairing] = useState(false);
+
+  const handleRepairStreak = async () => {
+    if (!profile) return;
+    setRepairing(true);
+    const result = await repairStreak(profile.id);
+    setRepairing(false);
+    setShowRepairConfirm(false);
+    if (result.success) {
+      qc.invalidateQueries({ queryKey: queryKeys.userPassport(profile.id) });
+      qc.invalidateQueries({ queryKey: ['userCoins', profile.id] });
+      toast.success(result.message);
+    } else {
+      toast.error(result.message);
+    }
+  };
+
+  // Google account linking — lets users who signed up with email add Google
+  // sign-in later. Check current identities when the settings sheet opens.
+  const [googleLinked, setGoogleLinked] = useState(false);
+  useEffect(() => {
+    if (!showSettings) return;
+    supabase.auth.getUserIdentities()
+      .then(({ data }) => setGoogleLinked(!!data?.identities?.some(i => i.provider === 'google')))
+      .catch(() => {});
+  }, [showSettings]);
+
+  const handleLinkGoogle = async () => {
+    if (googleLinked) return;
+    try {
+      const { error } = await supabase.auth.linkIdentity({ provider: 'google' });
+      if (error) throw error;
+      // OAuth opens in the browser; on return the identity is linked.
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not connect Google. Try again.');
+    }
   };
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -211,6 +273,10 @@ export default function ProfileScreen() {
 
   if (!profile) return null;
 
+  const streakWeeks = passport?.streak_days ?? 0;
+  const streakBroken = isStreakBroken(streakWeeks, (passport?.last_activity_date as string | null) ?? null);
+  const repairCost = streakRepairCost(streakWeeks);
+
   const tasteProfile = profile.taste_profile
     ? TASTE_PROFILE_LABELS[profile.taste_profile]
     : null;
@@ -218,11 +284,10 @@ export default function ProfileScreen() {
   const theme = getProfileTheme(profile.active_theme as string | undefined);
 
   const TABS: { key: TabKey; label: string; count: number }[] = [
-    { key: 'reviews', label: 'Reviews', count: profile.total_reviews },
-    { key: 'rankings', label: 'Rankings', count: profile.total_reviews },
+    { key: 'reviews', label: 'Activity', count: profile.total_reviews },
+    { key: 'rankings', label: 'Ratings', count: profile.total_reviews },
     { key: 'saved', label: 'Saved', count: savedRestaurants?.length ?? 0 },
     { key: 'lists', label: 'Lists', count: profile.total_lists },
-    { key: 'passport', label: 'Passport', count: 0 },
   ];
 
   return (
@@ -340,11 +405,56 @@ export default function ProfileScreen() {
             <StatItem value={passport?.cities_visited.length ?? 0} label="Cities" />
           </View>
 
-          {/* Weekly streak card */}
-          <StreakCard weeks={passport?.streak_days ?? 0} />
+          {/* Passport button (left) + compact streak (right) */}
+          <View style={styles.streakRow}>
+            <TouchableOpacity
+              style={styles.passportBtn}
+              onPress={() => {
+                // Passport is bundled with Taste Analytics — gated behind the same
+                // referral/coins unlock. Show the gate if it isn't unlocked yet.
+                if (isUnlocked('taste_analytics')) setShowPassport(true);
+                else setGate(FEATURES.taste_analytics);
+              }}
+              activeOpacity={0.85}
+            >
+              <RText style={{ fontSize: 24, lineHeight: 30 }}>🎖️</RText>
+              <View style={{ flex: 1 }}>
+                <RText variant="titleSmall" numberOfLines={1}>Passport</RText>
+                <Caption color={colors.textSecondary}>
+                  {isUnlocked('taste_analytics') ? `${badges?.length ?? 0} badges` : '🔒 1 referral or 1,000 🪙'}
+                </Caption>
+              </View>
+              <Ionicons
+                name={isUnlocked('taste_analytics') ? 'chevron-forward' : 'lock-closed'}
+                size={16}
+                color={colors.textTertiary}
+              />
+            </TouchableOpacity>
+            <StreakCard weeks={passport?.streak_days ?? 0} compact />
+          </View>
 
-          {/* Monthly recap entry */}
-          <RecapCard />
+          {/* Streak lapsed → offer a coin repair so it isn't lost */}
+          {streakBroken && (
+            <TouchableOpacity
+              style={styles.repairBanner}
+              onPress={() => setShowRepairConfirm(true)}
+              activeOpacity={0.9}
+            >
+              <RText style={{ fontSize: 20, lineHeight: 26 }}>💔</RText>
+              <View style={{ flex: 1 }}>
+                <RText variant="titleSmall" color={colors.textPrimary}>
+                  Your {streakWeeks}-week streak lapsed
+                </RText>
+                <Caption color={colors.textSecondary}>Revive it before it resets</Caption>
+              </View>
+              <View style={styles.repairCta}>
+                <RText variant="labelMedium" color={colors.white}>Repair · {repairCost} 🪙</RText>
+              </View>
+            </TouchableOpacity>
+          )}
+
+          {/* Monthly recap entry — only during the viewing window */}
+          {getRecapWindow().open && <RecapCard />}
 
 
           {/* Badges preview */}
@@ -403,25 +513,29 @@ export default function ProfileScreen() {
 
         {/* index 1 — sticky tabs */}
         <View style={styles.tabs}>
-          {TABS.map(tab => (
-            <TouchableOpacity
-              key={tab.key}
-              style={[styles.tab, activeTab === tab.key && { borderBottomColor: theme.accent }]}
-              onPress={() => setActiveTab(tab.key)}
-            >
-              <RText
-                variant="labelMedium"
-                color={activeTab === tab.key ? theme.accent : colors.textSecondary}
+          {TABS.map(tab => {
+            const active = activeTab === tab.key;
+            return (
+              <TouchableOpacity
+                key={tab.key}
+                style={[styles.tab, active && { borderBottomColor: theme.accent }]}
+                onPress={() => setActiveTab(tab.key)}
+                activeOpacity={0.7}
               >
-                {tab.label}
-              </RText>
-              {tab.count > 0 && (
-                <Caption color={activeTab === tab.key ? theme.accent : colors.textTertiary}>
+                <RText
+                  style={[
+                    styles.tabLabel,
+                    { color: active ? theme.accent : colors.textPrimary, fontWeight: active ? '800' : '700' },
+                  ]}
+                >
+                  {tab.label}
+                </RText>
+                <RText style={[styles.tabCountText, { color: active ? theme.accent : colors.textTertiary }]}>
                   {tab.count}
-                </Caption>
-              )}
-            </TouchableOpacity>
-          ))}
+                </RText>
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
         {/* Taste DNA — shown on reviews tab */}
@@ -436,7 +550,16 @@ export default function ProfileScreen() {
         {/* Tab content */}
         <View style={styles.tabContent}>
           {activeTab === 'reviews' && (
-            <ReviewsList reviews={reviews ?? []} onDelete={(rid) => setReviewToDelete(rid)} />
+            <ReviewsList
+              reviews={reviews ?? []}
+              actor={{
+                id: profile.id,
+                username: profile.username,
+                display_name: profile.display_name,
+                avatar_url: profile.avatar_url,
+              }}
+              onDelete={(rid) => setReviewToDelete(rid)}
+            />
           )}
           {activeTab === 'rankings' && (
             <RankingsTab reviews={reviews ?? []} userId={profile.id} location={location} />
@@ -451,15 +574,30 @@ export default function ProfileScreen() {
           {activeTab === 'lists' && (
             <ListsTab lists={userLists ?? []} />
           )}
-          {activeTab === 'passport' && (
-            <PassportView
-              passport={passport}
-              badges={badges ?? []}
-              coins={userCoins}
-            />
-          )}
         </View>
       </ScrollView>
+
+      {/* Passport popup (opened from the header button) */}
+      <Modal
+        visible={showPassport}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowPassport(false)}
+      >
+        <View style={styles.passportOverlay}>
+          <View style={styles.passportSheet}>
+            <View style={styles.passportSheetHeader}>
+              <RText variant="h4">Food Passport</RText>
+              <TouchableOpacity onPress={() => setShowPassport(false)} hitSlop={10}>
+                <Ionicons name="close" size={24} color={colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <PassportView passport={passport} badges={badges ?? []} coins={userCoins} />
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {/* Settings menu */}
       <Modal
@@ -517,8 +655,20 @@ export default function ProfileScreen() {
             <SettingsItem
               icon="stats-chart-outline"
               label="Taste Analytics"
-              sublabel={isUnlocked('taste_analytics') ? 'Unlocked' : 'Refer 3 friends'}
+              sublabel={isUnlocked('taste_analytics') ? 'Unlocked' : '1 referral or 1,000 🪙'}
               onPress={() => openFeature('taste_analytics')}
+            />
+            <SettingsItem
+              icon="logo-google"
+              label={googleLinked ? 'Google connected' : 'Connect Google account'}
+              sublabel={googleLinked ? 'You can sign in with Google' : 'Add Google sign-in to this account'}
+              onPress={handleLinkGoogle}
+            />
+            <SettingsItem
+              icon="help-buoy-outline"
+              label="Contact Us"
+              sublabel="Support, bugs & feedback"
+              onPress={() => { setShowSettings(false); router.push('/support'); }}
             />
             <SettingsItem
               icon="shield-checkmark-outline"
@@ -558,6 +708,16 @@ export default function ProfileScreen() {
       />
 
       <ConfirmDialog
+        visible={showRepairConfirm}
+        title={`Repair your ${streakWeeks}-week streak?`}
+        message={`Spend ${repairCost} 🪙 to revive it — your next review will continue from week ${streakWeeks} instead of starting over.`}
+        confirmLabel={`Repair · ${repairCost} 🪙`}
+        loading={repairing}
+        onConfirm={handleRepairStreak}
+        onCancel={() => setShowRepairConfirm(false)}
+      />
+
+      <ConfirmDialog
         visible={showDeleteConfirm}
         title="Delete your account?"
         message="This permanently removes your profile, reviews, photos, followers, coins and everything else. This cannot be undone."
@@ -570,10 +730,11 @@ export default function ProfileScreen() {
 
       <FeatureGateModal
         feature={gate}
-        referralCount={referralCount}
+        referralCredits={referralCredits}
         coins={userCoins}
         onClose={() => setGate(null)}
         onUnlockWithCoins={handleUnlockWithCoins}
+        onUnlockWithReferral={handleUnlockWithReferral}
         onInvite={() => { setGate(null); handleInvite(); }}
       />
     </SafeAreaView>
@@ -590,22 +751,48 @@ function StatItem({ value, label, onPress }: { value: number; label: string; onP
   );
 }
 
-function ReviewsList({ reviews, onDelete }: { reviews: Review[]; onDelete?: (id: string) => void }) {
+function ReviewsList({ reviews, actor, onDelete }: {
+  reviews: Review[];
+  actor: ReviewPost['actor'];
+  onDelete?: (id: string) => void;
+}) {
   if (reviews.length === 0) {
     return (
       <View style={styles.emptyTab}>
         <RText style={{ fontSize: 32, lineHeight: 42 }}>✍️</RText>
-        <RText variant="titleMedium" style={{ marginTop: spacing[3] }}>No reviews yet</RText>
+        <RText variant="titleMedium" style={{ marginTop: spacing[3] }}>No activity yet</RText>
         <Caption color={colors.textSecondary}>Rate restaurants to build your profile</Caption>
       </View>
     );
   }
 
   return (
-    <View style={styles.reviewsList}>
-      {reviews.map(review => (
-        <ReviewCard key={review.id} review={review} onDelete={onDelete} />
-      ))}
+    <View style={styles.feedList}>
+      {reviews.map((review, i) => {
+        const r = review.restaurant as any;
+        const post: ReviewPost = {
+          reviewId: review.id,
+          rating: review.rating,
+          content: review.content,
+          photos: (review.photos ?? []) as string[],
+          createdAt: review.created_at,
+          likeCount: review.like_count ?? 0,
+          commentCount: review.comment_count ?? 0,
+          isLiked: review.is_liked ?? false,
+          restaurant: r
+            ? { id: r.id, name: r.name, slug: r.slug ?? null, category: r.category, area: r.area, city: r.city }
+            : null,
+          actor,
+        };
+        // Same full-bleed Instagram card as the home feed, minus the redundant
+        // per-card actor header (it's obviously this user's own page).
+        return (
+          <View key={review.id}>
+            <ReviewPostCard post={post} variant="feed" showActor={false} onDelete={onDelete} />
+            {i < reviews.length - 1 && <View style={styles.feedSeparator} />}
+          </View>
+        );
+      })}
     </View>
   );
 }
@@ -618,23 +805,23 @@ function PassportView({
   coins: number;
 }) {
   const stats = [
-    { label: 'Restaurants', value: passport?.restaurants_visited ?? 0, icon: '🍽️' },
-    { label: 'Cities', value: passport?.cities_visited?.length ?? 0, icon: '🏙️' },
-    { label: 'States', value: passport?.states_visited?.length ?? 0, icon: '🗺️' },
-    { label: 'Cuisines', value: passport?.cuisines_tried?.length ?? 0, icon: '🌍' },
-    { label: 'Reviews', value: passport?.reviews_written ?? 0, icon: '✍️' },
-    { label: 'Likes', value: passport?.total_likes_received ?? 0, icon: '❤️' },
+    { label: 'Restaurants', value: passport?.restaurants_visited ?? 0, icon: '🍽️', tint: '#FDECEA', num: colors.primary },
+    { label: 'Cities', value: passport?.cities_visited?.length ?? 0, icon: '🏙️', tint: '#E9F2FF', num: '#2563EB' },
+    { label: 'States', value: passport?.states_visited?.length ?? 0, icon: '🗺️', tint: '#EAF6EE', num: '#3E8E5A' },
+    { label: 'Cuisines', value: passport?.cuisines_tried?.length ?? 0, icon: '🌍', tint: '#FFF3E0', num: colors.accentDark },
+    { label: 'Reviews', value: passport?.reviews_written ?? 0, icon: '✍️', tint: '#F3ECFB', num: '#7C3AED' },
+    { label: 'Likes', value: passport?.total_likes_received ?? 0, icon: '❤️', tint: '#FDE8EF', num: '#BE185D' },
   ];
 
   return (
     <View style={styles.passport}>
-      {/* Passport stats */}
+      {/* Passport stats — colourful tiles, 3 per row */}
       <View style={styles.passportStats}>
         {stats.map(s => (
-          <View key={s.label} style={styles.passportStat}>
-            <RText style={{ fontSize: 24 }}>{s.icon}</RText>
-            <RText variant="stat" style={{ marginTop: spacing[1] }}>{s.value}</RText>
-            <Caption>{s.label}</Caption>
+          <View key={s.label} style={[styles.passportStat, { backgroundColor: s.tint }]}>
+            <RText style={{ fontSize: 26, lineHeight: 32 }}>{s.icon}</RText>
+            <RText style={[styles.passportStatNum, { color: s.num }]}>{s.value}</RText>
+            <Caption color={colors.textSecondary} style={{ fontWeight: '700' }}>{s.label}</Caption>
           </View>
         ))}
       </View>
@@ -664,10 +851,33 @@ function PassportView({
 }
 
 // Weekly streak card — prominent, always visible, motivating.
-function StreakCard({ weeks }: { weeks: number }) {
+function StreakCard({ weeks, compact }: { weeks: number; compact?: boolean }) {
   const active = weeks > 0;
   const nextMilestone = Math.ceil((weeks + (active ? 0.0001 : 1)) / 5) * 5;
   const progress = active ? (weeks % 5 === 0 ? 1 : (weeks % 5) / 5) : 0;
+
+  // Compact half-width variant used beside the Passport button.
+  if (compact) {
+    return (
+      <LinearGradient
+        colors={active ? ['#FF7A45', '#D94841'] : [colors.gray100, colors.gray200]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.streakCompact}
+      >
+        <RText style={{ fontSize: 22, lineHeight: 28 }}>{active ? '🔥' : '🌱'}</RText>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+          <RText style={[styles.streakNumCompact, { color: active ? colors.white : colors.textPrimary }]}>{weeks}</RText>
+          <RText variant="labelSmall" color={active ? colors.whiteTransparent90 : colors.textSecondary} style={{ marginLeft: 5 }}>
+            wk streak
+          </RText>
+        </View>
+        <View style={[styles.streakTrack, { marginTop: 4, backgroundColor: active ? 'rgba(255,255,255,0.3)' : colors.gray300 }]}>
+          <View style={[styles.streakFill, { width: `${Math.round(progress * 100)}%`, backgroundColor: active ? colors.white : colors.gray400 }]} />
+        </View>
+      </LinearGradient>
+    );
+  }
 
   return (
     <LinearGradient
@@ -1118,6 +1328,68 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   streakNum: { fontSize: 30, lineHeight: 36, fontWeight: '800' },
+
+  // Passport button + compact streak row
+  streakRow: {
+    flexDirection: 'row',
+    gap: spacing[3],
+    marginBottom: spacing[4],
+  },
+  passportBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    borderRadius: radius.xl,
+    padding: spacing[3] + 2,
+    backgroundColor: colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.borderLight,
+    ...(shadows.xs as object),
+  },
+  streakCompact: {
+    flex: 1,
+    borderRadius: radius.xl,
+    paddingVertical: spacing[3],
+    paddingHorizontal: spacing[4],
+    justifyContent: 'center',
+  },
+  repairBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[3],
+    marginBottom: spacing[4],
+    padding: spacing[3] + 2,
+    borderRadius: radius.xl,
+    backgroundColor: colors.accentSurface,
+    borderWidth: 1,
+    borderColor: colors.accentLight,
+  },
+  repairCta: {
+    backgroundColor: colors.primary,
+    borderRadius: radius.full,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+  },
+  streakNumCompact: { fontSize: 24, lineHeight: 30, fontWeight: '800' },
+
+  // Passport popup
+  passportOverlay: { flex: 1, backgroundColor: colors.blackTransparent40, justifyContent: 'flex-end' },
+  passportSheet: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: radius['2xl'],
+    borderTopRightRadius: radius['2xl'],
+    paddingTop: spacing[4],
+    paddingHorizontal: spacing[4],
+    maxHeight: '85%',
+  },
+  passportSheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing[3],
+  },
+
   // Recap entry card
   recapCard: {
     flexDirection: 'row',
@@ -1225,11 +1497,14 @@ const styles = StyleSheet.create({
   tab: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: spacing[3],
-    gap: 2,
-    borderBottomWidth: 2,
+    justifyContent: 'center',
+    paddingVertical: spacing[3] + 2,
+    gap: 3,
+    borderBottomWidth: 3,
     borderBottomColor: 'transparent',
   },
+  tabLabel: { fontSize: 15, letterSpacing: 0.2 },
+  tabCountText: { fontSize: 13, fontWeight: '800', lineHeight: 16 },
   tabActive: { borderBottomColor: colors.primary },
   tabContent: { paddingTop: spacing[2] },
   newListBtn: {
@@ -1252,7 +1527,11 @@ const styles = StyleSheet.create({
     gap: spacing[2],
   },
   reviewsList: { paddingHorizontal: spacing[4], paddingTop: spacing[2], gap: spacing[3] },
-  passport: { paddingHorizontal: spacing[4], paddingTop: spacing[4] },
+  // Full-bleed feed-style Activity list (edge-to-edge, separators like the feed).
+  feedList: { paddingTop: spacing[2] },
+  feedSeparator: { height: 8, backgroundColor: colors.backgroundSecondary },
+  // No horizontal padding here — the modal sheet already pads by spacing[4].
+  passport: { paddingTop: spacing[2], paddingBottom: spacing[4] },
   passportStats: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1260,13 +1539,15 @@ const styles = StyleSheet.create({
     marginBottom: spacing[6],
   },
   passportStat: {
+    // Fits the sheet's inner width (screen − sheet padding), 3 tiles per row.
     width: (SCREEN_WIDTH - spacing[4] * 2 - spacing[3] * 2) / 3,
     alignItems: 'center',
-    backgroundColor: colors.gray50,
     borderRadius: radius.xl,
-    padding: spacing[4],
-    gap: spacing[0.5],
+    paddingVertical: spacing[4],
+    paddingHorizontal: spacing[2],
+    gap: spacing[1],
   },
+  passportStatNum: { fontSize: 26, lineHeight: 30, fontWeight: '800' },
   // Taste matches
   matchesSection: {
     paddingTop: spacing[4],

@@ -1,4 +1,5 @@
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useRef, useState, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View, StyleSheet, RefreshControl, TouchableOpacity, ScrollView, Animated, Switch,
 } from 'react-native';
@@ -11,6 +12,7 @@ import * as Haptics from 'expo-haptics';
 import { colors, spacing, radius, shadows } from '@/theme';
 import { useTheme } from '@/theme/ThemeProvider';
 import { saveUserHalal } from '@/stores/settingsStore';
+import { isHalalFriendly } from '@/lib/halal';
 import { RText, Caption } from '@/components/ui/Text';
 import { Avatar } from '@/components/ui/Avatar';
 import { FlashList } from '@shopify/flash-list';
@@ -18,11 +20,13 @@ import { FeedCard } from '@/components/feed/FeedCard';
 import { ForYouSection, TrendingSection } from '@/components/recommendations/ForYouSection';
 import { TimeAwareBanner } from '@/components/ui/TimeAwareBanner';
 import { EmailVerifyBanner } from '@/components/ui/EmailVerifyBanner';
+import { WelcomeTour } from '@/components/ui/WelcomeTour';
 import { useAuthStore } from '@/stores/authStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useBlockedUserIds } from '@/hooks/useBlockedUsers';
 import { getHomeFeed } from '@/services/feed';
 import { getRecommendations, getTrendingNearby, dismissRecommendation } from '@/services/recommendations';
+import { getRecapWindow } from '@/services/recap';
 import { queryKeys } from '@/lib/queryClient';
 import type { FeedItem } from '@/types';
 
@@ -35,6 +39,18 @@ export default function HomeScreen() {
   const qc = useQueryClient();
   const insets = useSafeAreaInsets();
   const safeTop = Math.max(insets.top, 44);
+
+  // First-run walkthrough — shows ONLY for a newly-created account (onboarding
+  // sets the pending flag), so existing users signing in never see it.
+  const [showTour, setShowTour] = useState(false);
+  useEffect(() => {
+    if (!profile?.id) return;
+    AsyncStorage.getItem(`rasa-tour-pending-${profile.id}`).then(p => { if (p) setShowTour(true); });
+  }, [profile?.id]);
+  const dismissTour = useCallback(() => {
+    setShowTour(false);
+    if (profile?.id) AsyncStorage.removeItem(`rasa-tour-pending-${profile.id}`).catch(() => {});
+  }, [profile?.id]);
 
   // Recommendations
   const { data: recsData, isLoading: recsLoading } = useQuery({
@@ -76,7 +92,7 @@ export default function HomeScreen() {
   const blockedIds = useBlockedUserIds();
   const feedItems = (feedData?.pages.flat() ?? []).filter(item => !blockedIds.has(item.actor.id));
   const recs = (recsData ?? []).filter(r =>
-    !halalOnly || r.restaurant.dietary_options?.includes('halal_certified')
+    !halalOnly || isHalalFriendly(r.restaurant.dietary_options)
   );
   const trending = (trendingData ?? []);
 
@@ -93,6 +109,8 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.container}>
+      <WelcomeTour visible={showTour} onDone={dismissTour} />
+
       {/* Header */}
       <View style={[styles.header, { paddingTop: safeTop }]}>
         <RText style={styles.logo}>
@@ -150,14 +168,14 @@ export default function HomeScreen() {
             <View style={{ paddingTop: spacing[4] }}>
               <TimeAwareBanner />
             </View>
-            <RecapPromo />
+            {getRecapWindow().open && <RecapPromo />}
             {!recsLoading && recs.length > 0 && (
               <ForYouSection recs={recs.slice(0, 8)} onDismiss={(id) => dismissMutation.mutate(id)} />
             )}
             {trending.length > 0 && (
               <TrendingSection
                 title={`🔥 Trending in ${profile?.city ?? 'KL'}`}
-                subtitle={halalOnly ? 'Halal certified only' : 'Most popular this week'}
+                subtitle={halalOnly ? 'Halal & Muslim-friendly' : 'Most popular this week'}
                 restaurants={trending}
               />
             )}

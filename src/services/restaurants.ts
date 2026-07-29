@@ -1,5 +1,9 @@
 import { supabase } from '@/lib/supabase';
+import { HALAL_DIETARY_TAGS } from '@/lib/halal';
 import type { Restaurant, Review, RestaurantPhoto, PopularDish, ReviewForm, AlgoliaRestaurant } from '@/types';
+
+// Halal browsing = certified OR muslim-friendly (see src/lib/halal.ts).
+const HALAL_TAGS = HALAL_DIETARY_TAGS as unknown as string[];
 
 /**
  * Direct-to-Postgres restaurant search. Used as a fallback when Algolia is
@@ -21,7 +25,7 @@ export async function searchRestaurantsSupabase(
     .order('popularity_score', { ascending: false })
     .limit(opts.limit ?? 8);
 
-  if (opts.halalOnly) q = q.contains('dietary_options', ['halal_certified']);
+  if (opts.halalOnly) q = q.overlaps('dietary_options', HALAL_TAGS);
 
   const { data, error } = await q;
   if (error) throw error;
@@ -256,18 +260,34 @@ export async function getRestaurantsByCategory(
   city: string,
   category: string,
   limit = 50,
+  sort: 'popular' | 'top' = 'popular',
+  halalOnly = false,
 ): Promise<Restaurant[]> {
-  const { data, error } = await supabase
+  let q = supabase
     .from('restaurants')
     .select('*')
     .eq('is_approved', true)
     .eq('is_active', true)
     .eq('city', city)
-    .eq('category', category)
-    .order('popularity_score', { ascending: false })
-    .order('overall_rating', { ascending: false })
-    .limit(limit);
+    .eq('category', category);
 
+  if (halalOnly) q = q.overlaps('dietary_options', HALAL_TAGS);
+
+  // 'top' genuinely re-queries for the best-rated spots (rating, then how many
+  // people rated — falling back to Google's rating so early/sparse DBs still
+  // surface quality). 'popular' is the default broad set (good for Near Me).
+  if (sort === 'top') {
+    q = q
+      .order('overall_rating', { ascending: false })
+      .order('total_reviews', { ascending: false })
+      .order('google_rating', { ascending: false, nullsFirst: false });
+  } else {
+    q = q
+      .order('popularity_score', { ascending: false })
+      .order('overall_rating', { ascending: false });
+  }
+
+  const { data, error } = await q.limit(limit);
   if (error) throw error;
   return (data as Restaurant[]) ?? [];
 }
@@ -337,7 +357,7 @@ export async function getNearbyRestaurants(
     .limit(200);
 
   if (opts.category) query = query.eq('category', opts.category);
-  if (opts.halalOnly) query = query.contains('dietary_options', ['halal_certified']);
+  if (opts.halalOnly) query = query.overlaps('dietary_options', HALAL_TAGS);
 
   const { data, error } = await query;
   if (error) throw error;

@@ -19,7 +19,7 @@ export interface FeatureDef {
  * dual-track (referral OR coins). See docs/referrals_and_unlocks.md.
  */
 export const FEATURES: Record<string, FeatureDef> = {
-  // Referral-only (3)
+  // Referral-only — each costs 1 referral, unlocked INDEPENDENTLY.
   friends_ratings: {
     id: 'friends_ratings', name: "Friends' Ratings", emoji: '👥',
     description: 'See exactly how the people you follow rated every spot.',
@@ -28,23 +28,23 @@ export const FEATURES: Record<string, FeatureDef> = {
   who_saved: {
     id: 'who_saved', name: 'Who Saved This', emoji: '🔖',
     description: 'See which of your friends saved a place to try.',
-    referralsRequired: 2, coinCost: null,
+    referralsRequired: 1, coinCost: null,
   },
-  taste_analytics: {
-    id: 'taste_analytics', name: 'Taste Analytics', emoji: '📊',
-    description: 'Deep stats on your palate, top cuisines and taste matches.',
-    referralsRequired: 3, coinCost: null,
-  },
-  // Dual-track: referral OR coins (2)
   store_averages: {
     id: 'store_averages', name: 'Community Ratings', emoji: '⭐',
     description: 'Reveal the aggregate community rating on every restaurant.',
     referralsRequired: 1, coinCost: null, // referral-only — cannot be bought with coins
   },
+  // Dual-track: 1 referral OR coins.
+  taste_analytics: {
+    id: 'taste_analytics', name: 'Taste Analytics', emoji: '📊',
+    description: 'Deep stats on your palate, top cuisines and taste matches — bundled with your Food Passport insights.',
+    referralsRequired: 1, coinCost: 1000,
+  },
   monthly_recap: {
     id: 'monthly_recap', name: 'Monthly Recap', emoji: '✨',
     description: 'Your shareable wrapped: top places, cuisines, cities and stats.',
-    referralsRequired: 1, coinCost: 800,
+    referralsRequired: 1, coinCost: 1500,
   },
 };
 
@@ -63,6 +63,34 @@ export async function getUnlockedFeatures(userId: string): Promise<Set<string>> 
     .select('feature')
     .eq('user_id', userId);
   return new Set((data ?? []).map((r: { feature: string }) => r.feature));
+}
+
+/** How many referral-funded unlocks the user has already spent. */
+export async function getReferralUnlockCount(userId: string): Promise<number> {
+  const { count } = await supabase
+    .from('feature_unlocks')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('source', 'referral');
+  return count ?? 0;
+}
+
+/**
+ * Spend ONE referral credit to unlock a single feature. Each activated referral
+ * is a credit; unlocking is independent (referring one friend unlocks one
+ * feature, not all). The UNIQUE(user_id, feature) row prevents double-spends.
+ */
+export async function unlockWithReferral(
+  userId: string,
+  feature: FeatureDef,
+): Promise<{ success: boolean; message: string }> {
+  const { error } = await supabase
+    .from('feature_unlocks')
+    .insert({ user_id: userId, feature: feature.id, source: 'referral' });
+  if (error && !error.message.toLowerCase().includes('duplicate')) {
+    return { success: false, message: 'Could not unlock. Try again.' };
+  }
+  return { success: true, message: `${feature.name} unlocked!` };
 }
 
 /** Unlock a dual-track feature by spending coins. Returns success + balance. */
@@ -105,13 +133,25 @@ export function useFeatureAccess() {
     staleTime: 1000 * 60,
   });
 
+  const { data: referralUnlockCount = 0 } = useQuery({
+    queryKey: ['referralUnlockCount', uid],
+    queryFn: () => getReferralUnlockCount(uid!).catch(() => 0),
+    enabled: !!uid,
+    staleTime: 1000 * 60,
+  });
+
+  // Referral credits still available to spend (each unlock costs one).
+  const referralCredits = Math.max(0, referralCount - referralUnlockCount);
+
+  // A feature is unlocked ONLY via an explicit unlock (referral credit or coins)
+  // or for ambassadors — NOT automatically at a referral threshold, so one
+  // referral doesn't unlock everything.
   const isUnlocked = (featureId: string) => {
     if (isAmbassador) return true;
     const f = FEATURES[featureId];
     if (!f) return true;
-    if (unlocked.has(featureId)) return true;
-    return referralCount >= f.referralsRequired;
+    return unlocked.has(featureId);
   };
 
-  return { isUnlocked, referralCount, unlocked, isAmbassador };
+  return { isUnlocked, referralCount, referralCredits, unlocked, isAmbassador };
 }

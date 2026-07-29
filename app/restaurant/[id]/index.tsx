@@ -32,7 +32,7 @@ import { useReviewedRestaurantIds } from '@/hooks/useReviewedRestaurants';
 import { getUserCoins } from '@/services/coins';
 import { SaveToListSheet } from '@/components/lists/SaveToListSheet';
 import { PhotoViewerModal } from '@/components/restaurants/PhotoViewerModal';
-import { useFeatureAccess, unlockWithCoins, FEATURES, type FeatureDef } from '@/services/features';
+import { useFeatureAccess, unlockWithCoins, unlockWithReferral, FEATURES, type FeatureDef } from '@/services/features';
 import { shareInvite } from '@/lib/referral';
 import { FeatureGateModal } from '@/components/ui/FeatureGateModal';
 import { FoodTagList } from '@/components/ui/FoodTag';
@@ -52,7 +52,7 @@ export default function RestaurantScreen() {
   const userId = useAuthStore(selectCurrentUserId);
   const qc = useQueryClient();
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
-  const { isUnlocked, referralCount } = useFeatureAccess();
+  const { isUnlocked, referralCredits } = useFeatureAccess();
   const [gate, setGate] = useState<FeatureDef | null>(null);
   const [showSaveToList, setShowSaveToList] = useState(false);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
@@ -74,6 +74,19 @@ export default function RestaurantScreen() {
     if (result.success) {
       qc.invalidateQueries({ queryKey: ['featureUnlocks', profile.id] });
       qc.invalidateQueries({ queryKey: ['userCoins', profile.id] });
+      toast.success(result.message);
+      setGate(null);
+    } else {
+      toast.error(result.message);
+    }
+  };
+
+  const handleUnlockWithReferral = async (feature: FeatureDef) => {
+    if (!profile) return;
+    const result = await unlockWithReferral(profile.id, feature);
+    if (result.success) {
+      qc.invalidateQueries({ queryKey: ['featureUnlocks', profile.id] });
+      qc.invalidateQueries({ queryKey: ['referralUnlockCount', profile.id] });
       toast.success(result.message);
       setGate(null);
     } else {
@@ -570,7 +583,7 @@ export default function RestaurantScreen() {
             if (communityTags.length === 0 && !userId) return null;
             return (
               <View style={styles.tagsSection}>
-                <View style={styles.sectionHeader}>
+                <View style={styles.sectionHeaderRow}>
                   <H4>Community Tags</H4>
                   {userId && (
                     <TouchableOpacity onPress={() => router.push(`/restaurant/${rid}/tags`)}>
@@ -586,7 +599,7 @@ export default function RestaurantScreen() {
                     maxVisible={8}
                   />
                 ) : (
-                  <TouchableOpacity onPress={() => router.push(`/restaurant/${rid}/tags`)} activeOpacity={0.7}>
+                  <TouchableOpacity onPress={() => router.push(`/restaurant/${rid}/tags`)} activeOpacity={0.7} style={{ paddingHorizontal: spacing[4] }}>
                     <Caption color={colors.textSecondary}>
                       No community tags yet — be one of the first to tag this spot.
                     </Caption>
@@ -665,10 +678,11 @@ export default function RestaurantScreen() {
 
       <FeatureGateModal
         feature={gate}
-        referralCount={referralCount}
+        referralCredits={referralCredits}
         coins={coins}
         onClose={() => setGate(null)}
         onUnlockWithCoins={handleUnlockWithCoins}
+        onUnlockWithReferral={handleUnlockWithReferral}
         onInvite={() => { setGate(null); const r = profile?.referral_code ?? profile?.username; if (r) shareInvite(r); }}
       />
 

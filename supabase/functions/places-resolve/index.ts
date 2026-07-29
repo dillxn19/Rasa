@@ -4,7 +4,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders, json } from '../_shared/cors.ts';
 import {
-  mapCategory, mapCuisines, mapPriceRange, priceLevelToInt, extractLocation, slugify,
+  mapCategory, mapCuisines, mapPriceRange, priceLevelToInt, extractLocation, slugify, mapDietary,
 } from '../_shared/places.ts';
 
 const GOOGLE_KEY = Deno.env.get('GOOGLE_PLACES_KEY')!;
@@ -97,6 +97,11 @@ Deno.serve(async (req) => {
       description: p.editorialSummary?.text ?? existing?.description ?? null,
       category: mapCategory(p.primaryType, p.types, name),
       cuisines: mapCuisines(p.primaryType, p.types),
+      // Trust-critical: conservative halal inference — never "halal_certified" from
+      // Google. Recomputed on each sync so improvements propagate to google rows.
+      dietary_options: mapDietary(
+        name, mapCategory(p.primaryType, p.types, name), p.editorialSummary?.text ?? '', p.types ?? [],
+      ),
       price_range: mapPriceRange(p.priceLevel) ?? existing?.price_range ?? '$$',
       price_level: priceLevelToInt(p.priceLevel),
       address: p.formattedAddress ?? '',

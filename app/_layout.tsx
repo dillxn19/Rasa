@@ -152,6 +152,10 @@ function RootLayout() {
               options={{ presentation: 'card', animation: 'slide_from_right' }}
             />
             <Stack.Screen
+              name="support"
+              options={{ presentation: 'card', animation: 'slide_from_right' }}
+            />
+            <Stack.Screen
               name="legal/privacy"
               options={{ presentation: 'card', animation: 'slide_from_right' }}
             />

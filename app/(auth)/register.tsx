@@ -60,8 +60,9 @@ export default function RegisterScreen() {
 
     setIsLoading(true);
     try {
-      const { error } = await supabase.auth.signUp({
-        email: email.trim().toLowerCase(),
+      const emailNorm = email.trim().toLowerCase();
+      const { data, error } = await supabase.auth.signUp({
+        email: emailNorm,
         password,
         options: {
           emailRedirectTo: 'rasa://auth/callback',
@@ -70,7 +71,13 @@ export default function RegisterScreen() {
       if (error) throw error;
       // Persist the typed/link referral code so onboarding records it after signup.
       if (ref) await setPendingReferrer(ref);
-      router.replace('/(auth)/onboarding');
+      // When email confirmation is ON, signUp returns no session — the user must
+      // verify first. Otherwise (confirmations off) they're signed in → onboard.
+      if (!data.session) {
+        router.replace({ pathname: '/(auth)/verify-email', params: { email: emailNorm } });
+      } else {
+        router.replace('/(auth)/onboarding');
+      }
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : 'Please try again.', 'Sign up failed');
     } finally {

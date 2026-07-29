@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import type { AlgoliaRestaurant } from '@/types';
+import type { AlgoliaRestaurant, Restaurant } from '@/types';
 
 // ─── Google Places session tokens ─────────────────────────────────────────────
 // Google bills an Autocomplete "session" (all keystrokes + one Details call) as a
@@ -87,6 +87,19 @@ export async function resolvePlace(
     return null;
   }
   return rowToAlgolia(data.restaurant);
+}
+
+/**
+ * On-demand category/dish browse from Google (fills a sparse Rasa DB in early
+ * stages). Upserts real rows server-side and returns them as full Restaurant rows
+ * so Explore renders normal cards. Best-effort — returns [] on failure.
+ */
+export async function browseGoogle(
+  opts: { category?: string; dish?: string; city: string; lat?: number; lng?: number },
+): Promise<Restaurant[]> {
+  const { data, error } = await supabase.functions.invoke('browse-google', { body: opts });
+  if (error || !data?.rows) return [];
+  return data.rows as Restaurant[];
 }
 
 /** A resolved Rasa restaurant hit already carries an id — adapt it too. */

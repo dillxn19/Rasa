@@ -74,9 +74,45 @@ async function loadDashboard() {
   // Waitlist + job applications are read directly (RLS restricts SELECT to admins).
   await loadWaitlist();
   await loadApplications();
+  await loadReports();
 
   dashView.classList.remove('hidden');
   loginView.classList.add('hidden');
+}
+
+async function loadReports() {
+  const { data, error } = await sb.rpc('admin_reports');
+  const body = $('rp-body'), empty = $('rp-empty'), count = $('rp-count');
+  if (error) { empty.textContent = 'Could not load reports: ' + error.message; return; }
+  const pending = (data || []).filter((r) => r.status === 'pending');
+  count.textContent = String(pending.length);
+  if (!data || data.length === 0) { body.innerHTML = ''; empty.textContent = 'No reports — clean queue.'; return; }
+  empty.textContent = '';
+  body.innerHTML = data.map((r) => {
+    const target = r.review_id ? 'Review' : r.comment_id ? 'Comment' : r.reported_username ? 'User' : 'Restaurant';
+    const resolved = r.status !== 'pending';
+    const action = resolved
+      ? `<span class="muted">${escapeHtml(r.status)}</span>`
+      : `<button class="btn btn-sm" data-resolve="${r.id}">Resolve</button>`;
+    return `<tr>
+      <td>${fmtDate(r.created_at)}</td>
+      <td><strong>${escapeHtml(r.reason)}</strong>${r.description ? `<br><small>${escapeHtml(r.description)}</small>` : ''}</td>
+      <td>${escapeHtml(r.reporter_username ? '@' + r.reporter_username : r.reporter_name || '—')}</td>
+      <td>${escapeHtml(r.reported_username ? '@' + r.reported_username : r.reported_name || '—')}</td>
+      <td>${target}</td>
+      <td>${escapeHtml(r.status)}</td>
+      <td>${action}</td>
+    </tr>`;
+  }).join('');
+
+  body.querySelectorAll('button[data-resolve]').forEach((btn) =>
+    btn.addEventListener('click', async () => {
+      btn.disabled = true; btn.textContent = '…';
+      const { error: e } = await sb.rpc('admin_resolve_report', { p_id: btn.dataset.resolve, p_status: 'resolved' });
+      if (e) { btn.disabled = false; btn.textContent = 'Resolve'; alert(e.message); return; }
+      loadReports();
+    })
+  );
 }
 
 function fmtDate(ts) {

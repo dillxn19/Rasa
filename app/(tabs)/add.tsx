@@ -672,20 +672,22 @@ export default function AddReviewScreen() {
 
                 {peopleResults.length > 0 ? (
                   <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-                    {(peopleResults as any[]).map(u => (
-                      <TouchableOpacity
-                        key={u.id}
-                        style={styles.resultRow}
-                        onPress={() => router.push(`/user/${u.username}`)}
-                      >
-                        <Avatar uri={u.avatar_url} name={u.display_name} size="md" />
-                        <View style={{ flex: 1, marginLeft: spacing[3] }}>
-                          <RText variant="titleSmall">{u.display_name}</RText>
-                          <Caption color={colors.textSecondary}>@{u.username} · {u.city} · {u.total_reviews} reviews</Caption>
-                        </View>
-                        <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-                      </TouchableOpacity>
-                    ))}
+                    <View style={styles.resultsList}>
+                      {(peopleResults as any[]).map(u => (
+                        <TouchableOpacity
+                          key={u.id}
+                          style={styles.resultRow}
+                          onPress={() => router.push(`/user/${u.username}`)}
+                        >
+                          <Avatar uri={u.avatar_url} name={u.display_name} size="md" />
+                          <View style={{ flex: 1, marginLeft: spacing[3] }}>
+                            <RText variant="titleSmall">{u.display_name}</RText>
+                            <Caption color={colors.textSecondary}>@{u.username} · {u.city} · {u.total_reviews} reviews</Caption>
+                          </View>
+                          <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+                        </TouchableOpacity>
+                      ))}
+                    </View>
                   </ScrollView>
                 ) : debouncedPeopleQuery.length >= 2 && !peopleSearching ? (
                   <View style={styles.noResults}>

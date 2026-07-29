@@ -8,7 +8,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders, json } from '../_shared/cors.ts';
 import {
-  mapCategory, mapCuisines, mapPriceRange, priceLevelToInt, extractLocation, slugify,
+  mapCategory, mapCuisines, mapPriceRange, priceLevelToInt, extractLocation, slugify, mapDietary,
 } from '../_shared/places.ts';
 
 const GOOGLE_KEY = Deno.env.get('GOOGLE_PLACES_KEY')!;
@@ -38,9 +38,14 @@ const QUERIES = [
       'laksa', 'satay', 'chicken rice', 'wan tan mee', 'cendol',
       'burger', 'pizza', 'ramen', 'sushi', 'korean bbq', 'fried chicken', 'brunch', 'bingsu',
     ];
+    // Campus beachhead — seed spots students at Sunway / Taylor's / Monash
+    // actually eat at (the first markets we're approaching).
+    const campuses = ['Sunway University', "Taylor's University Lakeside", 'Monash University Malaysia', 'Sunway Pyramid'];
+    const studentTerms = ['cafe', 'cheap eats', 'mamak', 'brunch', 'dessert', 'bubble tea'];
     const q: string[] = [];
     for (const c of categories) for (const a of areas) q.push(`best ${c} in ${a}`); // 45
     for (const d of dishes) q.push(`best ${d} in Kuala Lumpur`);                     // 18
+    for (const cam of campuses) for (const t of studentTerms) q.push(`best ${t} near ${cam}`); // 24
     return q;
   })(),
 ];
@@ -95,6 +100,10 @@ Deno.serve(async (req) => {
       description: p.editorialSummary?.text ?? null,
       category: mapCategory(p.primaryType, p.types, name),
       cuisines: mapCuisines(p.primaryType, p.types),
+      // Trust-critical conservative halal inference (never "halal_certified").
+      dietary_options: mapDietary(
+        name, mapCategory(p.primaryType, p.types, name), p.editorialSummary?.text ?? '', p.types ?? [],
+      ),
       price_range: mapPriceRange(p.priceLevel) ?? '$$',
       price_level: priceLevelToInt(p.priceLevel),
       address: p.formattedAddress ?? '',

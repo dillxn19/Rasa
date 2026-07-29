@@ -31,15 +31,42 @@ export interface RecapData {
 }
 
 /**
- * Aggregates the current calendar month's review activity into a shareable
- * "Rasa Wrapped" recap. All computation is client-side over a single month's
- * reviews (small set), so no dedicated SQL view is needed.
+ * The recap is only viewable in a window: the **last week of the recapped month
+ * through the first week of the next month**. Outside that window it's "not ready
+ * yet". During the first week of a month, the recap shown is the PREVIOUS month's.
+ * Returns whether the window is open + which month to recap.
  */
-export async function getMonthlyRecap(userId: string): Promise<RecapData> {
-  const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-  const monthLabel = now.toLocaleString('en-US', { month: 'long' });
-  const year = now.getFullYear();
+export function getRecapWindow(now: Date = new Date()): {
+  open: boolean;
+  monthDate: Date;
+  monthLabel: string;
+} {
+  const day = now.getDate();
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+
+  let open = false;
+  let monthDate = new Date(now.getFullYear(), now.getMonth(), 1);
+  if (day >= daysInMonth - 6) {
+    // Last 7 days of the month → this month's recap.
+    open = true;
+  } else if (day <= 7) {
+    // First 7 days of the month → last month's recap.
+    open = true;
+    monthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  }
+  return { open, monthDate, monthLabel: monthDate.toLocaleString('en-US', { month: 'long' }) };
+}
+
+/**
+ * Aggregates a calendar month's review activity into a shareable "Rasa Wrapped"
+ * recap. Defaults to the current month; pass `monthDate` to recap a specific one.
+ * All computation is client-side over a single month's reviews (small set).
+ */
+export async function getMonthlyRecap(userId: string, monthDate: Date = new Date()): Promise<RecapData> {
+  const monthStart = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1).toISOString();
+  const monthEnd = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1).toISOString();
+  const monthLabel = monthDate.toLocaleString('en-US', { month: 'long' });
+  const year = monthDate.getFullYear();
 
   const [{ data: reviews }, { data: coinRows }] = await Promise.all([
     supabase
@@ -49,13 +76,15 @@ export async function getMonthlyRecap(userId: string): Promise<RecapData> {
       )
       .eq('user_id', userId)
       .gte('created_at', monthStart)
+      .lt('created_at', monthEnd)
       .order('rating', { ascending: false }),
     supabase
       .from('coin_transactions')
       .select('amount')
       .eq('user_id', userId)
       .gt('amount', 0)
-      .gte('created_at', monthStart),
+      .gte('created_at', monthStart)
+      .lt('created_at', monthEnd),
   ]);
 
   const rows = (reviews ?? []) as any[];

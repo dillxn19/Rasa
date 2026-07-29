@@ -10,7 +10,8 @@ export type CoinTransactionType =
   | 'referral_activated'
   | 'like_received'
   | 'spend_theme'
-  | 'spend_sticker';
+  | 'spend_sticker'
+  | 'streak_repair';
 
 export const COIN_AMOUNTS = {
   review: 25,

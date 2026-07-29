@@ -11,22 +11,25 @@ import type { FeatureDef } from '@/services/features';
  */
 export function FeatureGateModal({
   feature,
-  referralCount,
+  referralCredits,
   coins,
   onClose,
   onUnlockWithCoins,
+  onUnlockWithReferral,
   onInvite,
 }: {
   feature: FeatureDef | null;
-  referralCount: number;
+  /** Referral credits the user has available to spend (each unlock costs 1). */
+  referralCredits: number;
   coins: number;
   onClose: () => void;
   onUnlockWithCoins: (feature: FeatureDef) => void;
+  onUnlockWithReferral: (feature: FeatureDef) => void;
   onInvite: () => void;
 }) {
   if (!feature) return null;
 
-  const remaining = Math.max(0, feature.referralsRequired - referralCount);
+  const hasCredit = referralCredits >= 1;
   const canBuy = feature.coinCost != null && coins >= feature.coinCost;
 
   return (
@@ -45,15 +48,27 @@ export function FeatureGateModal({
             {feature.description}
           </Caption>
 
-          {/* Referral path */}
-          <TouchableOpacity style={styles.pathBtn} onPress={onInvite} activeOpacity={0.9}>
-            <Ionicons name="people" size={18} color={colors.white} />
-            <RText variant="titleSmall" color={colors.white} style={{ marginLeft: spacing[2] }}>
-              {remaining === 0
-                ? 'Invite friends to unlock'
-                : `Invite ${remaining} ${remaining === 1 ? 'friend' : 'friends'} — free`}
-            </RText>
-          </TouchableOpacity>
+          {/* Referral path — spend a credit if you have one, else invite */}
+          {hasCredit ? (
+            <TouchableOpacity style={styles.pathBtn} onPress={() => onUnlockWithReferral(feature)} activeOpacity={0.9}>
+              <Ionicons name="gift" size={18} color={colors.white} />
+              <RText variant="titleSmall" color={colors.white} style={{ marginLeft: spacing[2] }}>
+                Use 1 referral to unlock
+              </RText>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={styles.pathBtn} onPress={onInvite} activeOpacity={0.9}>
+              <Ionicons name="people" size={18} color={colors.white} />
+              <RText variant="titleSmall" color={colors.white} style={{ marginLeft: spacing[2] }}>
+                Invite a friend to unlock — free
+              </RText>
+            </TouchableOpacity>
+          )}
+          {hasCredit && (
+            <Caption align="center" color={colors.textTertiary} style={{ marginTop: spacing[2] }}>
+              You have {referralCredits} referral {referralCredits === 1 ? 'credit' : 'credits'} to spend
+            </Caption>
+          )}
 
           {/* Coin path (dual-track only) */}
           {feature.coinCost != null ? (

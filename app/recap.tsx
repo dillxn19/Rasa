@@ -18,14 +18,14 @@ import { colors, spacing, radius } from '@/theme';
 import { RText, Caption } from '@/components/ui/Text';
 import { StarRating } from '@/components/ui/StarRating';
 import { useAuthStore } from '@/stores/authStore';
-import { getMonthlyRecap, type RecapData } from '@/services/recap';
+import { getMonthlyRecap, getRecapWindow, type RecapData } from '@/services/recap';
 import { scoreColor } from '@/components/profile/ReviewCard';
 import { useFeatureAccess } from '@/services/features';
 import { shareInvite } from '@/lib/referral';
 import { toast } from '@/stores/toastStore';
 import { CATEGORY_LABELS } from '@/types';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const CATEGORY_EMOJI: Record<string, string> = {
   hawker: '🍜', mamak: '🥛', cafe: '☕', kopitiam: '🍳', fine_dining: '🥂',
@@ -51,12 +51,23 @@ export default function RecapScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const slideRefs = useRef<Array<View | null>>([]);
 
+  // Recap is only viewable in the window: the last week of the recapped month
+  // through the first week of the next month.
+  const window = getRecapWindow();
+
   const { data: recap, isLoading } = useQuery({
-    queryKey: ['monthlyRecap', profile?.id],
-    queryFn: () => getMonthlyRecap(profile!.id),
-    enabled: !!profile,
-    staleTime: 1000 * 60 * 5,
+    queryKey: ['monthlyRecap', profile?.id, window.monthLabel],
+    queryFn: () => getMonthlyRecap(profile!.id, window.monthDate),
+    enabled: !!profile && window.open,
+    // Always refetch when the recap is opened — otherwise newly-rated places
+    // wouldn't show until the cache expired (felt like the recap was "wrong").
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
+
+  if (!window.open) {
+    return <RecapNotReady />;
+  }
 
   // Recap unlocks once you've ranked 10 places (enough of a food story to be fun).
   const placesRanked = profile?.total_reviews ?? 0;
@@ -483,12 +494,20 @@ function buildSlides(recap: RecapData, handle?: string): React.ReactNode[] {
 // Photos stay fully visible — only a soft edge vignette keeps the top/bottom
 // chrome legible; the card itself provides its own contrast.
 function SummaryCollage({ photos }: { photos: string[] }) {
-  const grid = photos.slice(0, 9);
+  if (photos.length === 0) return null;
+  // Adaptive mosaic that always FILLS the whole screen (no half-empty backdrop):
+  // more photos → more columns → more, smaller cells. Minimum 2 columns (a 2×2+
+  // grid). Cells are square and tiled/repeated to cover the full height.
+  const cols = photos.length <= 4 ? 2 : photos.length <= 12 ? 3 : 4;
+  const cell = SCREEN_WIDTH / cols;
+  const rows = Math.max(2, Math.ceil(SCREEN_HEIGHT / cell));
+  const total = cols * rows;
+  const grid = Array.from({ length: total }, (_, i) => photos[i % photos.length]);
   return (
     <View style={styles.collage} pointerEvents="none">
       <View style={styles.collageGrid}>
         {grid.map((p, i) => (
-          <Image key={i} source={{ uri: p }} style={styles.collageCell} contentFit="cover" />
+          <Image key={i} source={{ uri: p }} style={{ width: cell, height: cell }} contentFit="cover" />
         ))}
       </View>
       <LinearGradient
@@ -570,6 +589,41 @@ function LockedRecap({ onInvite }: { onInvite: () => void }) {
           <Ionicons name="gift" size={18} color={colors.primary} />
           <RText variant="buttonMedium" color={colors.primary} style={{ marginLeft: spacing[2] }}>
             Invite a friend to unlock
+          </RText>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => router.back()} style={{ marginTop: spacing[4] }}>
+          <RText variant="labelMedium" color={colors.whiteTransparent80}>Maybe later</RText>
+        </TouchableOpacity>
+      </SafeAreaView>
+    </LinearGradient>
+  );
+}
+
+// Shown outside the viewing window (recap opens the last week of the month).
+function RecapNotReady() {
+  const now = new Date();
+  const thisMonth = now.toLocaleString('en-US', { month: 'long' });
+  return (
+    <LinearGradient colors={['#6D28D9', '#3B1D8F']} style={[styles.container, styles.center]}>
+      <StatusBar hidden />
+      <SafeAreaView style={[styles.center, { padding: spacing[8] }]}>
+        <View style={styles.lockBadge}>
+          <RText style={{ fontSize: 34, lineHeight: 42 }}>🗓️</RText>
+        </View>
+        <RText variant="h2" color={colors.white} align="center" style={{ marginTop: spacing[5] }}>
+          Not ready just yet
+        </RText>
+        <Caption color={colors.whiteTransparent90} align="center" style={{ marginTop: spacing[3], maxWidth: 300, lineHeight: 20 }}>
+          Your Rasa Wrapped unlocks in the last week of {thisMonth} and stays up through the first week of next month. Keep rating places — it'll be worth it.
+        </Caption>
+        <TouchableOpacity
+          style={styles.lockBtn}
+          onPress={() => { router.back(); router.push('/(tabs)/add'); }}
+          activeOpacity={0.9}
+        >
+          <Ionicons name="add" size={18} color={colors.primary} />
+          <RText variant="buttonMedium" color={colors.primary} style={{ marginLeft: spacing[2] }}>
+            Rate a place
           </RText>
         </TouchableOpacity>
         <TouchableOpacity onPress={() => router.back()} style={{ marginTop: spacing[4] }}>

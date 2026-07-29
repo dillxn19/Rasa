@@ -16,6 +16,7 @@ import Animated, {
   interpolate,
 } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { colors, spacing, radius, typography } from '@/theme';
 import { toast } from '@/stores/toastStore';
@@ -173,6 +174,9 @@ export default function OnboardingScreen() {
       } catch { /* non-fatal */ }
 
       track('onboarding_completed');
+      // Flag the first-run walkthrough to show once, ONLY for newly-created
+      // accounts (existing users signing in won't have this pending flag).
+      try { await AsyncStorage.setItem(`rasa-tour-pending-${profile.id}`, '1'); } catch { /* non-fatal */ }
       router.replace('/(tabs)');
     } catch (error) {
       toast.error('Failed to save profile. Please try again.');
