@@ -493,8 +493,15 @@ export async function submitReview(form: ReviewForm): Promise<Review> {
 }
 
 export async function deleteReview(reviewId: string): Promise<void> {
+  // Grab the owner first so we can reverse the review coin (anti delete+re-add farming).
+  const { data: rev } = await supabase
+    .from('reviews').select('user_id').eq('id', reviewId).maybeSingle();
   const { error } = await supabase.from('reviews').delete().eq('id', reviewId);
   if (error) throw error;
+  if (rev?.user_id) {
+    const { clawbackReviewReward } = await import('./coins');
+    await clawbackReviewReward(rev.user_id as string).catch(() => {});
+  }
 }
 
 /** Delete the current user's review for a restaurant (used by the rated-check). */
@@ -505,6 +512,8 @@ export async function deleteReviewForRestaurant(userId: string, restaurantId: st
     .eq('user_id', userId)
     .eq('restaurant_id', restaurantId);
   if (error) throw error;
+  const { clawbackReviewReward } = await import('./coins');
+  await clawbackReviewReward(userId).catch(() => {});
 }
 
 export async function likeReview(userId: string, reviewId: string): Promise<void> {

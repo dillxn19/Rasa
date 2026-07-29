@@ -12,6 +12,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { PhotoCarousel } from '@/components/ui/PhotoCarousel';
 import { ScoreBadge, scoreColor } from '@/components/profile/ReviewCard';
 import { SaveToListSheet } from '@/components/lists/SaveToListSheet';
+import { ReportSheet } from '@/components/ui/ReportSheet';
 import { useAuthStore } from '@/stores/authStore';
 import { useReviewedRestaurantIds } from '@/hooks/useReviewedRestaurants';
 import { likeReview, unlikeReview, saveRestaurant, unsaveRestaurant } from '@/services/restaurants';
@@ -90,6 +91,7 @@ export function ReviewPostCard({
   const [likeCount, setLikeCount] = useState(post.likeCount ?? 0);
   const [isSaved, setIsSaved] = useState(false);
   const [showListSheet, setShowListSheet] = useState(false);
+  const [showReport, setShowReport] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
   const openRestaurant = () => {
@@ -162,9 +164,12 @@ export function ReviewPostCard({
           <Caption>{post.actionLabel ?? 'reviewed'} · {timeAgo}</Caption>
         </View>
       </TouchableOpacity>
-      <TouchableOpacity onPress={handleShare} style={styles.moreBtn} hitSlop={8}>
-        <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} />
-      </TouchableOpacity>
+      {/* Overflow menu — Report (own posts have nothing to report). */}
+      {!isOwn && post.reviewId ? (
+        <TouchableOpacity onPress={() => setShowReport(true)} style={styles.moreBtn} hitSlop={8}>
+          <Ionicons name="ellipsis-horizontal" size={20} color={colors.textSecondary} />
+        </TouchableOpacity>
+      ) : null}
     </View>
   ) : null;
 
@@ -224,15 +229,27 @@ export function ReviewPostCard({
     </View>
   );
 
-  const ListSheet = r && profile ? (
-    <SaveToListSheet
-      visible={showListSheet}
-      userId={profile.id}
-      restaurantId={r.id}
-      restaurantName={r.name}
-      onClose={() => setShowListSheet(false)}
-    />
-  ) : null;
+  const ListSheet = (
+    <>
+      {r && profile ? (
+        <SaveToListSheet
+          visible={showListSheet}
+          userId={profile.id}
+          restaurantId={r.id}
+          restaurantName={r.name}
+          onClose={() => setShowListSheet(false)}
+        />
+      ) : null}
+      {post.reviewId ? (
+        <ReportSheet
+          visible={showReport}
+          target={{ reporterId: profile?.id ?? '', reviewId: post.reviewId }}
+          targetLabel="this review"
+          onClose={() => setShowReport(false)}
+        />
+      ) : null}
+    </>
+  );
 
   // ─────────────────────────────────────────────────────────────
   // FEED variant (option 2): IG-style media with name + score overlay.

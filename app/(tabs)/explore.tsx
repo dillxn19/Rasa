@@ -23,11 +23,10 @@ import {
   searchPlaces, resolvePlace, startPlacesSession, endPlacesSession, browseGoogle,
 } from '@/services/places';
 import { getAppFlag } from '@/services/signup';
-import { useSettingsStore, saveUserHalal } from '@/stores/settingsStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { isHalalFriendly } from '@/lib/halal';
 import { bayesianScore } from '@/lib/ranking';
 import { toast } from '@/stores/toastStore';
-import * as Haptics from 'expo-haptics';
 import { useUserLocation } from '@/hooks/useUserLocation';
 import { distanceKm, formatDistance } from '@/lib/geo';
 import { queryKeys } from '@/lib/queryClient';
@@ -160,13 +159,9 @@ export default function ExploreScreen() {
   const insets = useSafeAreaInsets();
   const theme = useTheme();
   const { dishName } = useLocalSearchParams<{ dishName?: string }>();
-  const { halalOnly, toggleHalalOnly } = useSettingsStore();
-
-  const handleHalalToggle = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    toggleHalalOnly();
-    if (profile) saveUserHalal(profile.id, !halalOnly);
-  };
+  // Halal is a single, universal preference (set on Home) — Explore just reads it
+  // and filters automatically, with no separate toggle here.
+  const { halalOnly } = useSettingsStore();
 
   const [tab, setTab] = useState<ExploreTab>('discover');
   const [view, setView] = useState<DiscoverView>('home');
@@ -572,7 +567,7 @@ export default function ExploreScreen() {
                 ))}
               </ScrollView>
 
-              <SortTabs mode={sortMode} onChange={(m) => { setSortMode(m); if (m === 'near') location.request(); }} halalOnly={halalOnly} onToggleHalal={handleHalalToggle} />
+              <SortTabs mode={sortMode} onChange={(m) => { setSortMode(m); if (m === 'near') location.request(); }} />
 
               {catLoading || (orderedResults.length === 0 && googleFetching) ? (
                 <ActivityIndicator color={colors.primary} style={{ marginTop: spacing[10] }} />
@@ -600,7 +595,7 @@ export default function ExploreScreen() {
 
           {view === 'dish' && activeDish && (
             <>
-              <SortTabs mode={sortMode} onChange={(m) => { setSortMode(m); if (m === 'near') location.request(); }} halalOnly={halalOnly} onToggleHalal={handleHalalToggle} />
+              <SortTabs mode={sortMode} onChange={(m) => { setSortMode(m); if (m === 'near') location.request(); }} />
 
               {dishLoading || (orderedResults.length === 0 && googleFetching) ? (
                 <ActivityIndicator color={colors.primary} style={{ marginTop: spacing[10] }} />
@@ -693,9 +688,8 @@ function restaurantDishEmojiKey(cat?: string): string {
 // ─── Results sort sub-tabs (Near Me / Top Rated) ─────────────
 // Shared by category + dish results so both drill-downs feel identical.
 
-function SortTabs({ mode, onChange, halalOnly, onToggleHalal }: {
+function SortTabs({ mode, onChange }: {
   mode: SortMode; onChange: (m: SortMode) => void;
-  halalOnly: boolean; onToggleHalal: () => void;
 }) {
   const opts: { key: SortMode; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
     { key: 'near', label: 'Near Me', icon: 'navigate' },
@@ -719,17 +713,6 @@ function SortTabs({ mode, onChange, halalOnly, onToggleHalal }: {
           </TouchableOpacity>
         );
       })}
-      <View style={{ flex: 1 }} />
-      {/* Halal filter — mirrors the global setting so Explore matches Home/Nearby */}
-      <TouchableOpacity
-        style={[styles.halalChip, halalOnly && styles.halalChipActive]}
-        onPress={onToggleHalal}
-        activeOpacity={0.85}
-      >
-        <RText variant="labelMedium" color={halalOnly ? colors.white : colors.halal} style={{ fontWeight: '800' }}>
-          ☪ Halal
-        </RText>
-      </TouchableOpacity>
     </View>
   );
 }
@@ -1061,20 +1044,6 @@ const styles = StyleSheet.create({
   sortChipActive: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
-  },
-  halalChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing[3],
-    paddingVertical: spacing[2],
-    borderRadius: radius.full,
-    borderWidth: 1,
-    borderColor: colors.halal,
-    backgroundColor: colors.halalBg,
-  },
-  halalChipActive: {
-    backgroundColor: colors.halal,
-    borderColor: colors.halal,
   },
 
   // Section headers

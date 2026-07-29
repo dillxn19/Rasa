@@ -37,6 +37,21 @@ export default function RegisterScreen() {
   // persist any typed referral code first so the gate can pass automatically.
   const handleGoogleSignup = async () => {
     const ref = refCode.trim();
+    // Invite-only: require a valid code BEFORE starting Google OAuth, so a new
+    // user can't create an account without one (matches the email path).
+    if (gateOn) {
+      if (!ref) {
+        toast.error("Rasa is invite-only right now — enter a friend's referral code first.", 'Code required');
+        return;
+      }
+      setIsLoading(true);
+      const valid = await validateReferralCode(ref).catch(() => false);
+      if (!valid) {
+        setIsLoading(false);
+        toast.error("That referral code isn't valid. Check it and try again.", 'Invalid code');
+        return;
+      }
+    }
     if (ref) await setPendingReferrer(ref).catch(() => {});
     setIsLoading(true);
     const { error } = await supabase.auth.signInWithOAuth({ provider: 'google' });

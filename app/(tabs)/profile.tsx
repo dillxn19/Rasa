@@ -196,6 +196,8 @@ export default function ProfileScreen() {
         qc.invalidateQueries({ queryKey: queryKeys.userReviews(profile.id) });
         qc.invalidateQueries({ queryKey: queryKeys.currentUser() });
         qc.invalidateQueries({ queryKey: queryKeys.userPassport(profile.id) });
+        qc.invalidateQueries({ queryKey: queryKeys.homeFeed() });
+        qc.invalidateQueries({ queryKey: ['userCoins', profile.id] });
       }
       toast.success('Review deleted');
     },

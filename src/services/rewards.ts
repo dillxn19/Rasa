@@ -2,6 +2,24 @@ import { awardCoins, COIN_AMOUNTS, DAILY_EARN_CAP, getCoinsEarnedToday } from '.
 import { updateReviewStreak } from './users';
 import { getRestaurantById } from './restaurants';
 import { activateReferral } from './referrals';
+import { supabase } from '@/lib/supabase';
+
+/**
+ * Has this user ALREADY earned the first-review bonus for this restaurant? The
+ * coin transaction persists even if they later delete the review, so this stops
+ * the "delete + re-add to re-earn the +20 bonus" exploit. Matches the coin ledger
+ * by type + the restaurant name embedded in the description.
+ */
+async function hasEarnedFirstReviewBonus(userId: string, restaurantName?: string): Promise<boolean> {
+  if (!restaurantName) return false;
+  const { count } = await supabase
+    .from('coin_transactions')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId)
+    .eq('type', 'first_restaurant_review')
+    .ilike('description', `%${restaurantName}%`);
+  return (count ?? 0) > 0;
+}
 
 export interface ReviewRewards {
   /** Total coins earned from this review (review + first-review bonus + streak). */
@@ -69,7 +87,10 @@ export async function awardReviewRewards(
     .then(r => (r?.total_reviews ?? 0) <= 1)
     .catch(() => false);
 
-  if (isFirstReview && !atCap) {
+  // ...but only pay it if they haven't ALREADY earned it here (anti delete+re-add).
+  const alreadyGotFirst = await hasEarnedFirstReviewBonus(userId, restaurantName).catch(() => false);
+
+  if (isFirstReview && !alreadyGotFirst && !atCap) {
     coinsEarned += COIN_AMOUNTS.first_restaurant_review;
     await awardCoins(
       userId,
@@ -92,7 +113,7 @@ export async function awardReviewRewards(
     streakWeeks: streak?.weeks ?? null,
     isNewWeek: streak?.newWeek ?? false,
     isMilestone: streak?.milestone ?? false,
-    isFirstReview,
+    isFirstReview: isFirstReview && !alreadyGotFirst,
     isEdit: false,
     cappedDaily: atCap,
   };

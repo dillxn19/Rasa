@@ -11,7 +11,8 @@ export type CoinTransactionType =
   | 'like_received'
   | 'spend_theme'
   | 'spend_sticker'
-  | 'streak_repair';
+  | 'streak_repair'
+  | 'review_removed';
 
 export const COIN_AMOUNTS = {
   review: 25,
@@ -81,6 +82,20 @@ export async function getCoinHistory(userId: string, limit = 20): Promise<CoinTr
     .order('created_at', { ascending: false })
     .limit(limit);
   return (data ?? []) as CoinTransaction[];
+}
+
+/**
+ * Reverse the base review coin when a review is deleted — this makes delete +
+ * re-add net-zero, so users can't farm coins by deleting and re-posting. The
+ * first-review bonus is handled separately (it's never re-awarded, see rewards.ts).
+ * Clamped so a user's balance can never go negative.
+ */
+export async function clawbackReviewReward(userId: string): Promise<void> {
+  const balance = await getUserCoins(userId).catch(() => 0);
+  const deduct = Math.min(balance, COIN_AMOUNTS.review);
+  if (deduct > 0) {
+    await awardCoins(userId, -deduct, 'review_removed', 'Review deleted — reward reversed').catch(() => {});
+  }
 }
 
 export async function spendCoins(
