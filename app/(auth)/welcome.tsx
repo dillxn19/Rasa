@@ -118,14 +118,16 @@ const styles = StyleSheet.create({
   logoContainer: {
     backgroundColor: colors.primary,
     paddingHorizontal: spacing[4],
-    paddingVertical: spacing[2],
+    paddingVertical: spacing[2] + 2,
     borderRadius: radius.lg,
   },
   logoText: {
     fontSize: 28,
+    lineHeight: 36,
     fontWeight: '800',
     color: colors.white,
     letterSpacing: -1,
+    includeFontPadding: false,
   },
   taglineContainer: {
     flex: 1,

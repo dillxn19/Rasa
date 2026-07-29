@@ -14,6 +14,11 @@ import { useAuthStore } from '@/stores/authStore';
 import {
   getUserCoins, getCoinHistory, purchaseTheme, SHOP_THEMES, type ThemeDef,
 } from '@/services/coins';
+import {
+  useFeatureAccess, unlockWithCoins, unlockWithReferral, FEATURES, type FeatureDef,
+} from '@/services/features';
+import { FeatureGateModal } from '@/components/ui/FeatureGateModal';
+import { shareInvite } from '@/lib/referral';
 import { toast } from '@/stores/toastStore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -24,6 +29,38 @@ export default function ShopScreen() {
   const qc = useQueryClient();
   const [purchasing, setPurchasing] = useState<string | null>(null);
   const [activeTheme, setActiveThemeLocal] = useState<string>(profile?.active_theme ?? 'default');
+  const { isUnlocked, referralCredits } = useFeatureAccess();
+  const [gate, setGate] = useState<FeatureDef | null>(null);
+
+  const handleUnlockWithCoins = async (feature: FeatureDef) => {
+    if (!profile) return;
+    const result = await unlockWithCoins(profile.id, feature);
+    if (result.success) {
+      qc.invalidateQueries({ queryKey: ['featureUnlocks', profile.id] });
+      qc.invalidateQueries({ queryKey: ['userCoins', profile.id] });
+      qc.invalidateQueries({ queryKey: ['coinHistory', profile.id] });
+      toast.success(result.message);
+      setGate(null);
+    } else {
+      toast.error(result.message);
+    }
+  };
+
+  const handleUnlockWithReferral = async (feature: FeatureDef) => {
+    if (!profile) return;
+    const result = await unlockWithReferral(profile.id, feature);
+    if (result.success) {
+      qc.invalidateQueries({ queryKey: ['featureUnlocks', profile.id] });
+      qc.invalidateQueries({ queryKey: ['referralUnlockCount', profile.id] });
+      toast.success(result.message);
+      setGate(null);
+    } else {
+      toast.error(result.message);
+    }
+  };
+
+  // The gated features shown as shop unlockables (Recap has its own Perk card).
+  const unlockables = Object.values(FEATURES).filter(f => f.id !== 'monthly_recap');
 
   const { data: coins = 0 } = useQuery({
     queryKey: ['userCoins', profile?.id],
@@ -124,6 +161,23 @@ export default function ShopScreen() {
             <Ionicons name="chevron-forward" size={20} color={colors.white} />
           </LinearGradient>
         </TouchableOpacity>
+
+        {/* Unlockable features */}
+        <View style={styles.sectionHeader}>
+          <H3>Unlockables</H3>
+          <Caption color={colors.textSecondary}>Unlock with a referral or coins</Caption>
+        </View>
+        <View style={styles.unlockList}>
+          {unlockables.map(feature => (
+            <FeatureRow
+              key={feature.id}
+              feature={feature}
+              unlocked={isUnlocked(feature.id)}
+              coins={coins}
+              onPress={() => setGate(feature)}
+            />
+          ))}
+        </View>
 
         {/* Themes */}
         <View style={styles.sectionHeader}>
@@ -227,7 +281,54 @@ export default function ShopScreen() {
           </>
         )}
       </ScrollView>
+
+      <FeatureGateModal
+        feature={gate}
+        referralCredits={referralCredits}
+        coins={coins}
+        onClose={() => setGate(null)}
+        onUnlockWithCoins={handleUnlockWithCoins}
+        onUnlockWithReferral={handleUnlockWithReferral}
+        onInvite={() => {
+          setGate(null);
+          const r = profile?.referral_code ?? profile?.username;
+          if (r) shareInvite(r);
+        }}
+      />
     </SafeAreaView>
+  );
+}
+
+// A gated feature as a shop unlockable row — shows Owned, a coin price, or the
+// referral badge; tapping a locked one opens the unlock sheet.
+function FeatureRow({ feature, unlocked, coins, onPress }: {
+  feature: FeatureDef; unlocked: boolean; coins: number; onPress: () => void;
+}) {
+  const canBuy = feature.coinCost != null;
+  const affordable = feature.coinCost != null && coins >= feature.coinCost;
+  return (
+    <TouchableOpacity style={styles.featureRow} onPress={onPress} disabled={unlocked} activeOpacity={0.85}>
+      <View style={styles.featureIcon}>
+        <RText style={{ fontSize: 22, lineHeight: 28 }}>{feature.emoji}</RText>
+      </View>
+      <View style={{ flex: 1 }}>
+        <RText variant="titleSmall" numberOfLines={1}>{feature.name}</RText>
+        <Caption color={colors.textSecondary} numberOfLines={2}>{feature.description}</Caption>
+      </View>
+      {unlocked ? (
+        <View style={styles.ownedChip}>
+          <Ionicons name="checkmark" size={13} color={colors.white} />
+          <RText style={{ fontSize: 10, color: colors.white, fontWeight: '800', marginLeft: 2 }}>OWNED</RText>
+        </View>
+      ) : (
+        <View style={styles.featurePrice}>
+          <RText variant="labelMedium" color={affordable ? colors.accentDark : colors.textSecondary}>
+            {canBuy ? `${feature.coinCost} 🪙` : '1 referral'}
+          </RText>
+          <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
+        </View>
+      )}
+    </TouchableOpacity>
   );
 }
 
@@ -418,6 +519,39 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
 
+  unlockList: {
+    paddingHorizontal: spacing[4],
+    gap: spacing[2],
+    marginBottom: spacing[4],
+  },
+  featureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[3],
+    backgroundColor: colors.surface,
+    borderRadius: radius.xl,
+    padding: spacing[3],
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    ...(shadows.xs as object),
+  },
+  featureIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.lg,
+    backgroundColor: colors.primarySurface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  featurePrice: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  ownedChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.success,
+    borderRadius: radius.full,
+    paddingHorizontal: spacing[2],
+    paddingVertical: 3,
+  },
   historyList: {
     paddingHorizontal: spacing[4],
   },

@@ -82,7 +82,7 @@ export default function AddReviewScreen() {
   const [content, setContent] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
   const [isPublic, setIsPublic] = useState(true);
-  const [visitDate, setVisitDate] = useState(new Date());
+  const [visitDate, setVisitDate] = useState<Date | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [success, setSuccess] = useState<ReviewSuccessData | null>(null);
@@ -230,7 +230,7 @@ export default function AddReviewScreen() {
         content: content.trim() || undefined,
         photos,
         is_public: isPublic,
-        visit_date: visitDate.toISOString().split('T')[0],
+        visit_date: visitDate ? visitDate.toISOString().split('T')[0] : undefined,
       });
     },
     onSuccess: async (review) => {
@@ -291,7 +291,7 @@ export default function AddReviewScreen() {
     setRating(0);
     setContent('');
     setPhotos([]);
-    setVisitDate(new Date());
+    setVisitDate(null);
     setSearchQuery('');
     setPlaceResults({ rasa: [], google: [] });
     endPlacesSession();
@@ -861,15 +861,27 @@ export default function AddReviewScreen() {
               </Caption>
             </View>
 
-            {/* Visit date */}
+            {/* Visit date (optional) */}
             <View style={styles.detailSection}>
-              <Caption style={{ marginBottom: spacing[3] }}>When did you go?</Caption>
+              <Caption style={{ marginBottom: spacing[3] }}>When did you go? (optional)</Caption>
               <TouchableOpacity style={styles.dateBtnFull} onPress={() => setShowDatePicker(true)}>
-                <Ionicons name="calendar-outline" size={18} color={colors.primary} />
-                <RText variant="titleSmall" style={{ marginLeft: spacing[2] }}>
-                  {visitDate.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })}
+                <Ionicons name="calendar-outline" size={18} color={visitDate ? colors.primary : colors.textTertiary} />
+                <RText
+                  variant="titleSmall"
+                  color={visitDate ? colors.textPrimary : colors.textTertiary}
+                  style={{ marginLeft: spacing[2] }}
+                >
+                  {visitDate
+                    ? visitDate.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' })
+                    : 'Add a date'}
                 </RText>
-                <Ionicons name="chevron-down" size={16} color={colors.textTertiary} style={{ marginLeft: 'auto' }} />
+                {visitDate ? (
+                  <TouchableOpacity onPress={() => setVisitDate(null)} hitSlop={10} style={{ marginLeft: 'auto' }}>
+                    <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
+                  </TouchableOpacity>
+                ) : (
+                  <Ionicons name="chevron-down" size={16} color={colors.textTertiary} style={{ marginLeft: 'auto' }} />
+                )}
               </TouchableOpacity>
             </View>
 
@@ -933,7 +945,7 @@ export default function AddReviewScreen() {
           <TouchableOpacity activeOpacity={1} style={styles.calCard}>
             <RText variant="h4" style={{ marginBottom: spacing[2] }}>When did you go?</RText>
             <MonthCalendar
-              value={visitDate}
+              value={visitDate ?? new Date()}
               onChange={(d) => { setVisitDate(d); setShowDatePicker(false); }}
               maximumDate={new Date()}
             />

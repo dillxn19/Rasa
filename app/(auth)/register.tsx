@@ -32,6 +32,18 @@ export default function RegisterScreen() {
     getSignupGate().then(setGateOn).catch(() => setGateOn(true));
   }, []);
 
+  // Create an account with Google. OAuth is the same call as sign-in; a brand-new
+  // Google user lands in onboarding (which still enforces the invite gate). We
+  // persist any typed referral code first so the gate can pass automatically.
+  const handleGoogleSignup = async () => {
+    const ref = refCode.trim();
+    if (ref) await setPendingReferrer(ref).catch(() => {});
+    setIsLoading(true);
+    const { error } = await supabase.auth.signInWithOAuth({ provider: 'google' });
+    setIsLoading(false);
+    if (error) toast.error(error.message, 'Google sign-up failed');
+  };
+
   const handleRegister = async () => {
     if (!email.trim()) {
       toast.error('Please enter your email address.');
@@ -206,6 +218,17 @@ export default function RegisterScreen() {
               size="lg"
               isLoading={isLoading}
             />
+
+            <View style={styles.orRow}>
+              <View style={styles.orLine} />
+              <Caption color={colors.textTertiary} style={{ marginHorizontal: spacing[3] }}>or</Caption>
+              <View style={styles.orLine} />
+            </View>
+
+            <TouchableOpacity style={styles.googleBtn} onPress={handleGoogleSignup} disabled={isLoading} activeOpacity={0.85}>
+              <RText style={styles.googleG}>G</RText>
+              <RText variant="titleMedium">Continue with Google</RText>
+            </TouchableOpacity>
           </View>
 
           <View style={styles.footer}>
@@ -272,4 +295,18 @@ const styles = StyleSheet.create({
     backgroundColor: colors.gray200,
   },
   footer: { alignItems: 'center', paddingVertical: spacing[8] },
+  orRow: { flexDirection: 'row', alignItems: 'center' },
+  orLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.border },
+  googleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[3],
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.xl,
+    paddingVertical: spacing[4],
+    backgroundColor: colors.surface,
+  },
+  googleG: { fontSize: 18, fontWeight: '700', color: '#4285F4' },
 });

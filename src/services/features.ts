@@ -3,6 +3,10 @@ import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
 import { spendCoins } from './coins';
 
+// Founder/admin usernames — always get full access to every gated feature and
+// unlockable, regardless of referrals/coins/DB flags.
+export const ADMIN_USERNAMES = new Set<string>(['dillxn_19']);
+
 export interface FeatureDef {
   id: string;
   name: string;
@@ -116,8 +120,13 @@ export async function unlockWithCoins(
  */
 export function useFeatureAccess() {
   const uid = useAuthStore((s) => s.profile?.id);
-  // Ambassadors get full access to every gated feature.
+  // Ambassadors AND admins get full access to every gated feature. Admins are
+  // pinned by username in code so the founder always has everything, regardless
+  // of the DB is_ambassador flag.
   const isAmbassador = useAuthStore((s) => !!s.profile?.is_ambassador);
+  const username = useAuthStore((s) => s.profile?.username);
+  const isAdmin = !!username && ADMIN_USERNAMES.has(username.toLowerCase());
+  const fullAccess = isAmbassador || isAdmin;
 
   const { data: referralCount = 0 } = useQuery({
     queryKey: ['referralCount', uid],
@@ -147,11 +156,11 @@ export function useFeatureAccess() {
   // or for ambassadors — NOT automatically at a referral threshold, so one
   // referral doesn't unlock everything.
   const isUnlocked = (featureId: string) => {
-    if (isAmbassador) return true;
+    if (fullAccess) return true;
     const f = FEATURES[featureId];
     if (!f) return true;
     return unlocked.has(featureId);
   };
 
-  return { isUnlocked, referralCount, referralCredits, unlocked, isAmbassador };
+  return { isUnlocked, referralCount, referralCredits, unlocked, isAmbassador: fullAccess, isAdmin };
 }
