@@ -46,8 +46,8 @@ export function getRecapWindow(now: Date = new Date()): {
 
   let open = false;
   let monthDate = new Date(now.getFullYear(), now.getMonth(), 1);
-  if (day >= daysInMonth - 6) {
-    // Last 7 days of the month → this month's recap.
+  if (day >= daysInMonth - 2) {
+    // Last 3 days of the month → this month's recap.
     open = true;
   } else if (day <= 7) {
     // First 7 days of the month → last month's recap.
