@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { colors, spacing, radius } from '@/theme';
 import { RText, Caption } from '@/components/ui/Text';
 import { RestaurantCard } from '@/components/restaurants/RestaurantCard';
+import { RestaurantCardSkeleton } from '@/components/restaurants/RestaurantCardSkeleton';
 import { useAuthStore } from '@/stores/authStore';
 import { useUserLocation } from '@/hooks/useUserLocation';
 import { useReviewedRestaurantIds } from '@/hooks/useReviewedRestaurants';
@@ -91,7 +92,11 @@ export default function RecommendationsScreen() {
       )}
 
       {loading ? (
-        <ActivityIndicator color={colors.primary} style={{ marginTop: spacing[10] }} />
+        <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <View key={`sk-${i}`} style={styles.cardWrap}><RestaurantCardSkeleton /></View>
+          ))}
+        </ScrollView>
       ) : mode === 'nearby' && !coords ? (
         <EmptyState icon="location-outline" title="Enable location" subtitle="Allow location access to see places near you." />
       ) : (

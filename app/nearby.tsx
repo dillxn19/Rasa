@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { colors, spacing, radius } from '@/theme';
 import { RText, Caption } from '@/components/ui/Text';
 import { SavedRestaurantCard } from '@/components/profile/SavedRestaurantCard';
+import { RestaurantCardSkeleton } from '@/components/restaurants/RestaurantCardSkeleton';
 import { useUserLocation } from '@/hooks/useUserLocation';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { getNearbyRestaurants } from '@/services/restaurants';
@@ -69,7 +70,11 @@ export default function NearbyScreen() {
           onCta={() => location.request()}
         />
       ) : !coords || isLoading ? (
-        <View style={styles.loading}><ActivityIndicator color={colors.primary} /></View>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.list}>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <View key={`sk-${i}`} style={{ marginBottom: spacing[3] }}><RestaurantCardSkeleton /></View>
+          ))}
+        </ScrollView>
       ) : (restaurants ?? []).length === 0 ? (
         <EmptyState
           emoji="🍽️"
