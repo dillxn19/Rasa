@@ -41,8 +41,8 @@ export const FEATURES: Record<string, FeatureDef> = {
   },
   // Dual-track: 1 referral OR coins.
   taste_analytics: {
-    id: 'taste_analytics', name: 'Taste Analytics', emoji: '📊',
-    description: 'Deep stats on your palate, top cuisines and taste matches — bundled with your Food Passport insights.',
+    id: 'taste_analytics', name: 'Food Passport', emoji: '📖',
+    description: 'Your Food Passport: stamps, badges, streaks, plus deep stats on your palate, top cuisines and taste matches.',
     referralsRequired: 1, coinCost: 1000,
   },
   monthly_recap: {

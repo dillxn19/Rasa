@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { signInWithGoogle } from '@/lib/oauth';
 import { colors, spacing, radius } from '@/theme';
 import { toast } from '@/stores/toastStore';
 import { Button } from '@/components/ui/Button';
@@ -63,8 +64,11 @@ export default function LoginScreen() {
   };
 
   const handleGoogleLogin = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({ provider: 'google' });
-    if (error) toast.error(error.message);
+    try {
+      await signInWithGoogle();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Google sign-in failed.');
+    }
   };
 
   return (

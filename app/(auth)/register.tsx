@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { signInWithGoogle } from '@/lib/oauth';
 import { colors, spacing, radius } from '@/theme';
 import { toast } from '@/stores/toastStore';
 import { getPendingReferrer, setPendingReferrer } from '@/lib/referral';
@@ -54,9 +55,13 @@ export default function RegisterScreen() {
     }
     if (ref) await setPendingReferrer(ref).catch(() => {});
     setIsLoading(true);
-    const { error } = await supabase.auth.signInWithOAuth({ provider: 'google' });
-    setIsLoading(false);
-    if (error) toast.error(error.message, 'Google sign-up failed');
+    try {
+      await signInWithGoogle();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Something went wrong.', 'Google sign-up failed');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleRegister = async () => {

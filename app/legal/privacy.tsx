@@ -26,8 +26,12 @@ export default function PrivacyScreen() {
           body: 'Reviews and profile details you post are visible to other Rasa users. You control what you share. Location is used only to find places near you and is not shown on your public profile.',
         },
         {
+          heading: 'Analytics & diagnostics',
+          body: 'We use PostHog to understand how features are used (product analytics) and Sentry to capture crash and error diagnostics so we can fix problems. This helps us improve Rasa. We do not use this data to track you across other companies’ apps or websites.',
+        },
+        {
           heading: 'Sharing with third parties',
-          body: 'We use trusted providers to operate the app — Supabase (hosting and database), Algolia (search), and Google Places (restaurant data). They process data on our behalf under their own security commitments. We may disclose data where required by Malaysian law.',
+          body: 'We use trusted providers to operate the app: Supabase (hosting and database), Algolia (search), Google Places (restaurant data), PostHog (product analytics), Sentry (crash and error diagnostics), and Resend (transactional and waitlist email). They process data on our behalf under their own security commitments. We may disclose data where required by Malaysian law. We do not sell your personal data.',
         },
         {
           heading: 'Data retention & deletion',

@@ -219,7 +219,7 @@ export default function LeaderboardScreen() {
             </RText>
             <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false}>
               {picker === 'city'
-                ? MALAYSIA_CITIES.map(c => (
+                ? ['All Cities', ...MALAYSIA_CITIES].map(c => (
                     <PickerRow key={c} label={c} selected={c === city} onPress={() => { setCity(c); setPicker(null); }} />
                   ))
                 : PERIODS.map(p => (
@@ -241,7 +241,7 @@ function LeaderboardRow({ entry, isCurrentUser }: { entry: LeaderboardEntry; isC
   return (
     <TouchableOpacity
       style={[styles.row, isCurrentUser && styles.rowMe]}
-      onPress={() => router.push(`/user/${entry.username}`)}
+      onPress={() => router.push(isCurrentUser ? '/(tabs)/profile' : `/user/${entry.username}`)}
       activeOpacity={0.8}
     >
       {/* Rank */}

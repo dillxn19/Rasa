@@ -20,7 +20,7 @@ import { RatingPicker } from '@/components/ui/StarRating';
 import { useAuthStore } from '@/stores/authStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { submitReview, getUserReviewForRestaurant, saveRestaurant, unsaveRestaurant } from '@/services/restaurants';
-import { searchDishes, tagDish } from '@/services/dishes';
+import { searchDishes, tagDish, getUserDishTagsForRestaurant } from '@/services/dishes';
 import {
   searchPlaces, resolvePlace, rasaHitToAlgolia, startPlacesSession, endPlacesSession,
   type PlacesSearchResult,
@@ -110,6 +110,32 @@ export default function AddReviewScreen() {
     queryFn: () => getUserReviewForRestaurant(profile!.id, restaurant!.objectID),
     enabled: !!profile && !!restaurant && step === 'rate',
   });
+
+  // Editing an existing review → prefill the form once (rating, text, photos,
+  // dish tags, visit date) so the user amends rather than re-enters everything.
+  const prefilledRef = useRef<string | null>(null);
+  useEffect(() => {
+    const er = existingReview as (typeof existingReview & {
+      dishes_mentioned?: string[]; visit_date?: string | null; photos?: string[];
+    }) | null | undefined;
+    if (er && prefilledRef.current !== er.id) {
+      prefilledRef.current = er.id;
+      setRating(er.rating);
+      setContent(er.content ?? '');
+      setPhotos((er.photos ?? []) as string[]);
+      if (er.visit_date) setVisitDate(new Date(er.visit_date));
+
+      const mentioned = (er.dishes_mentioned ?? []) as string[];
+      if (mentioned.length > 0) {
+        setTaggedDishes(mentioned.map(name => ({ name })));
+      } else if (profile && restaurant) {
+        // Older review saved tags only to the dish graph → backfill from there.
+        getUserDishTagsForRestaurant(profile.id, restaurant.objectID)
+          .then(tags => { if (tags.length) setTaggedDishes(tags); })
+          .catch(() => {});
+      }
+    }
+  }, [existingReview]);
 
   // Reviewed restaurant IDs (search step — to show checkmarks)
   const { data: reviewedIds } = useQuery({
@@ -229,6 +255,7 @@ export default function AddReviewScreen() {
         rating,
         content: content.trim() || undefined,
         photos,
+        dishes_mentioned: taggedDishes.map(d => d.name),
         is_public: isPublic,
         visit_date: visitDate ? visitDate.toISOString().split('T')[0] : undefined,
       });

@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { queryClient } from '@/lib/queryClient';
 import { loadUserHalal, useSettingsStore } from './settingsStore';
 import { identifyUser, resetAnalytics } from '@/lib/analytics';
+import { registerForPushNotifications } from '@/lib/push';
 import type { User } from '@/types';
 
 interface AuthState {
@@ -63,6 +64,7 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
         if (profile) {
           await loadUserHalal((profile as User).id);
           identifyUser((profile as User).id, { username: (profile as User).username });
+          registerForPushNotifications((profile as User).id);
         }
       }
 
@@ -87,6 +89,7 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
           if (profile) {
             await loadUserHalal((profile as User).id);
             identifyUser((profile as User).id, { username: (profile as User).username });
+            registerForPushNotifications((profile as User).id);
           }
         } else if (event === 'SIGNED_OUT') {
           queryClient.clear();

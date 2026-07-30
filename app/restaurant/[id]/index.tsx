@@ -36,6 +36,7 @@ import { useFeatureAccess, unlockWithCoins, unlockWithReferral, FEATURES, type F
 import { shareInvite } from '@/lib/referral';
 import { FeatureGateModal } from '@/components/ui/FeatureGateModal';
 import { FoodTagList } from '@/components/ui/FoodTag';
+import { ScoreBadge } from '@/components/profile/ReviewCard';
 import { toast } from '@/stores/toastStore';
 import { queryKeys, invalidateAfterReview } from '@/lib/queryClient';
 import type { Review } from '@/types';
@@ -313,6 +314,12 @@ export default function RestaurantScreen() {
               <TouchableOpacity style={styles.navBtn} onPress={handleShare}>
                 <Ionicons name="share-outline" size={22} color={colors.white} />
               </TouchableOpacity>
+              {hasVisited && (
+                // Already rated → pencil to edit your review (prefilled in add).
+                <TouchableOpacity style={styles.navBtn} onPress={handleRate}>
+                  <Ionicons name="create-outline" size={22} color={colors.white} />
+                </TouchableOpacity>
+              )}
               {hasVisited ? (
                 // Already rated → checkmark; tap to delete your review.
                 <TouchableOpacity style={styles.navBtn} onPress={() => setShowDeleteReview(true)}>
@@ -525,7 +532,7 @@ export default function RestaurantScreen() {
           {/* Write review CTA */}
           <View style={styles.reviewCTA}>
             <Button
-              label="Rate this restaurant"
+              label={hasVisited ? 'Edit your review' : 'Rate this restaurant'}
               onPress={() => router.push({
                 pathname: '/(tabs)/add',
                 params: {
@@ -580,12 +587,14 @@ export default function RestaurantScreen() {
               tag catalogue (incl. the user's own picks) lives on the /tags screen. */}
           {(() => {
             const communityTags = (foodTags ?? []).filter(t => t.count >= MIN_TAGS_TO_SURFACE);
-            if (communityTags.length === 0 && !userId) return null;
+            // Only people who've RATED this place can add/edit community tags.
+            const canTag = hasVisited;
+            if (communityTags.length === 0 && !canTag) return null;
             return (
               <View style={styles.tagsSection}>
                 <View style={styles.sectionHeaderRow}>
                   <H4>Community Tags</H4>
-                  {userId && (
+                  {canTag && (
                     <TouchableOpacity onPress={() => router.push(`/restaurant/${rid}/tags`)}>
                       <Caption color={colors.primary}>+ Add tag</Caption>
                     </TouchableOpacity>
@@ -594,14 +603,21 @@ export default function RestaurantScreen() {
                 {communityTags.length > 0 ? (
                   <FoodTagList
                     tags={communityTags}
-                    onToggle={(tag) => tagMutation.mutate(tag)}
-                    editable={!!userId}
+                    onToggle={(tag) => canTag && tagMutation.mutate(tag)}
+                    editable={canTag}
                     maxVisible={8}
                   />
                 ) : (
-                  <TouchableOpacity onPress={() => router.push(`/restaurant/${rid}/tags`)} activeOpacity={0.7} style={{ paddingHorizontal: spacing[4] }}>
+                  <TouchableOpacity
+                    disabled={!canTag}
+                    onPress={() => router.push(`/restaurant/${rid}/tags`)}
+                    activeOpacity={0.7}
+                    style={{ paddingHorizontal: spacing[4] }}
+                  >
                     <Caption color={colors.textSecondary}>
-                      No community tags yet — be one of the first to tag this spot.
+                      {canTag
+                        ? 'No community tags yet — be one of the first to tag this spot.'
+                        : 'Rate this place to add community tags.'}
                     </Caption>
                   </TouchableOpacity>
                 )}
@@ -629,19 +645,44 @@ export default function RestaurantScreen() {
             </View>
           )}
 
-          {/* Reviews section */}
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <H4>Reviews</H4>
-              <TouchableOpacity>
-                <Caption color={colors.primary}>See all</Caption>
-              </TouchableOpacity>
-            </View>
-
-            {(reviews ?? []).slice(0, 5).map(review => (
-              <ReviewRow key={review.id} review={review} />
-            ))}
-          </View>
+          {/* Reviews — compact score preview (friends first, then top-liked others);
+              full list lives on the /reviews screen. Just scores, no wording. */}
+          {(() => {
+            const friendIds = new Set((friendReviews ?? []).map(r => r.user_id));
+            const others = (reviews ?? []).filter(r => !friendIds.has(r.user_id)); // like-sorted
+            const previewFriends = (friendReviews ?? []).slice(0, 6);
+            const previewOthers = others.slice(0, previewFriends.length > 0 ? 2 : 4);
+            const preview = [...previewFriends, ...previewOthers];
+            if (preview.length === 0) return null;
+            return (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <H4>Reviews</H4>
+                  <TouchableOpacity onPress={() => router.push(`/restaurant/${rid}/reviews`)}>
+                    <Caption color={colors.primary}>See all</Caption>
+                  </TouchableOpacity>
+                </View>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.scorePreviewRow}
+                >
+                  {preview.map(r => (
+                    <TouchableOpacity
+                      key={r.id}
+                      style={styles.scorePreviewItem}
+                      activeOpacity={0.85}
+                      onPress={() => router.push(`/restaurant/${rid}/reviews`)}
+                    >
+                      <Avatar uri={r.user?.avatar_url} name={r.user?.display_name} size="sm" />
+                      <ScoreBadge rating={r.rating} size={36} />
+                      {friendIds.has(r.user_id) && <Caption color={colors.primary}>Friend</Caption>}
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            );
+          })()}
 
           {/* Info section */}
           <View style={styles.section}>
@@ -991,6 +1032,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: spacing[4],
   },
+  scorePreviewRow: { gap: spacing[4], paddingRight: spacing[4], paddingLeft: spacing[1] },
+  scorePreviewItem: { alignItems: 'center', gap: spacing[1] },
   dishesRow: { gap: spacing[3], paddingRight: spacing[4] },
   dishChip: {
     width: 120,

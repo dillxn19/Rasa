@@ -20,6 +20,7 @@ import { RText, Caption, H2, Body } from '@/components/ui/Text';
 import { Avatar } from '@/components/ui/Avatar';
 import { useAuthStore } from '@/stores/authStore';
 import { supabase } from '@/lib/supabase';
+import { linkGoogleIdentity } from '@/lib/oauth';
 import { getUserBadges, getUserPassport, getUserReviews, getUserLists, getTasteMatches, repairStreak, streakRepairCost, isStreakBroken } from '@/services/users';
 import { getSavedRestaurants, deleteReview } from '@/services/restaurants';
 import { getUserSavedDishes } from '@/services/dishes';
@@ -43,6 +44,7 @@ import { DishChip } from '@/components/dishes/DishCard';
 import { TasteMatchCard } from '@/components/users/TasteMatchBadge';
 import { ScoreBadge } from '@/components/profile/ReviewCard';
 import { ReviewPostCard, type ReviewPost } from '@/components/reviews/ReviewPostCard';
+import { TasteAnalyticsContent } from '@/components/profile/TasteAnalyticsContent';
 import { SavedRestaurantCard } from '@/components/profile/SavedRestaurantCard';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -106,7 +108,8 @@ export default function ProfileScreen() {
     if (featureId === 'monthly_recap') { router.push('/recap'); return; }
     const feature = FEATURES[featureId];
     if (isUnlocked(featureId)) {
-      if (featureId === 'taste_analytics') router.push('/taste-analytics');
+      // Taste Analytics now lives inside the Passport page.
+      if (featureId === 'taste_analytics') setShowPassport(true);
       else toast.info(`${feature.name} — coming soon!`);
     } else {
       setGate(feature);
@@ -178,9 +181,11 @@ export default function ProfileScreen() {
   const handleLinkGoogle = async () => {
     if (googleLinked) return;
     try {
-      const { error } = await supabase.auth.linkIdentity({ provider: 'google' });
-      if (error) throw error;
-      // OAuth opens in the browser; on return the identity is linked.
+      const ok = await linkGoogleIdentity();
+      if (ok) {
+        setGoogleLinked(true);
+        toast.success('Google account connected.');
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not connect Google. Try again.');
     }
@@ -594,8 +599,12 @@ export default function ProfileScreen() {
                 <Ionicons name="close" size={24} color={colors.textPrimary} />
               </TouchableOpacity>
             </View>
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: spacing[8] }}>
               <PassportView passport={passport} badges={badges ?? []} coins={userCoins} />
+              <View style={styles.passportTasteSection}>
+                <RText variant="h4" style={{ marginBottom: spacing[3] }}>Taste Analytics</RText>
+                <TasteAnalyticsContent />
+              </View>
             </ScrollView>
           </View>
         </View>
@@ -654,12 +663,6 @@ export default function ProfileScreen() {
                 onPress={() => { setShowSettings(false); router.push('/referrals'); }}
               />
             )}
-            <SettingsItem
-              icon="stats-chart-outline"
-              label="Taste Analytics"
-              sublabel={isUnlocked('taste_analytics') ? 'Unlocked' : '1 referral or 1,000 🪙'}
-              onPress={() => openFeature('taste_analytics')}
-            />
             <SettingsItem
               icon="logo-google"
               label={googleLinked ? 'Google connected' : 'Connect Google account'}
@@ -777,6 +780,7 @@ function ReviewsList({ reviews, actor, onDelete }: {
           rating: review.rating,
           content: review.content,
           photos: (review.photos ?? []) as string[],
+          dishes: (review.dishes_mentioned ?? []) as string[],
           createdAt: review.created_at,
           likeCount: review.like_count ?? 0,
           commentCount: review.comment_count ?? 0,
@@ -1377,6 +1381,7 @@ const styles = StyleSheet.create({
 
   // Passport popup
   passportOverlay: { flex: 1, backgroundColor: colors.blackTransparent40, justifyContent: 'flex-end' },
+  passportTasteSection: { marginTop: spacing[6], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, paddingTop: spacing[5] },
   passportSheet: {
     backgroundColor: colors.background,
     borderTopLeftRadius: radius['2xl'],

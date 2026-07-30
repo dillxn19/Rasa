@@ -94,12 +94,65 @@ export async function getSchoolLeaderboard(
   return leaderboardBy('school', school, period, limit);
 }
 
+/**
+ * City leaderboard, Beli-style: ranks users by how many places they've ranked
+ * IN THIS CITY — i.e. the city of the RESTAURANT reviewed, not the user's home
+ * city. So a user with 8 KL reviews + 2 PJ reviews scores 8 on the KL board and
+ * 2 on the PJ board, and appears on every city board where they have a review.
+ */
 export async function getLeaderboard(
   city: string,
   period: LeaderboardPeriod,
   limit = 20,
 ): Promise<LeaderboardEntry[]> {
-  return leaderboardBy('city', city, period, limit);
+  const since = period === 'alltime' ? null : getPeriodStart(period);
+  const allCities = city === 'All Cities';
+
+  // "All Cities" ranks by total ranked places everywhere; a specific city ranks
+  // by places in that city (joining reviews → restaurants to get the city).
+  let q = allCities
+    ? supabase.from('reviews').select('user_id').eq('is_public', true)
+    : supabase
+        .from('reviews')
+        .select('user_id, restaurants!inner(city)')
+        .eq('restaurants.city', city)
+        .eq('is_public', true);
+  if (since) q = q.gte('created_at', since);
+
+  const { data: rows } = await q;
+  if (!rows?.length) return [];
+
+  // Count each user's ranked places in this city (one review per restaurant).
+  const counts = new Map<string, number>();
+  (rows as { user_id: string }[]).forEach(r =>
+    counts.set(r.user_id, (counts.get(r.user_id) ?? 0) + 1),
+  );
+
+  const topIds = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([id]) => id);
+
+  const { data: users } = await supabase
+    .from('users')
+    .select('id, username, display_name, avatar_url, city, taste_profile')
+    .in('id', topIds)
+    .eq('is_active', true);
+
+  const byId = new Map((users ?? []).map(u => [u.id, u]));
+  return topIds
+    .map(id => byId.get(id))
+    .filter((u): u is NonNullable<typeof u> => !!u)
+    .map((u, i) => ({
+      id: u.id,
+      username: u.username,
+      display_name: u.display_name,
+      avatar_url: u.avatar_url,
+      city: u.city,
+      taste_profile: u.taste_profile as TasteProfileType | null,
+      review_count: counts.get(u.id) ?? 0,
+      rank: i + 1,
+    }));
 }
 
 async function leaderboardBy(

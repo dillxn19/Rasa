@@ -327,6 +327,7 @@ export default function UserProfileScreen() {
                     rating: review.rating,
                     content: review.content,
                     photos: (review.photos ?? []) as string[],
+                    dishes: (review.dishes_mentioned ?? []) as string[],
                     createdAt: review.created_at,
                     likeCount: review.like_count ?? 0,
                     commentCount: review.comment_count ?? 0,

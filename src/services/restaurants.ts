@@ -498,6 +498,8 @@ export async function deleteReview(reviewId: string): Promise<void> {
     .from('reviews').select('user_id').eq('id', reviewId).maybeSingle();
   const { error } = await supabase.from('reviews').delete().eq('id', reviewId);
   if (error) throw error;
+  // Remove the activity_event so it doesn't linger in feeds as a 0★ ghost.
+  await supabase.from('activity_events').delete().eq('review_id', reviewId).then(() => {}, () => {});
   if (rev?.user_id) {
     const { clawbackReviewReward } = await import('./coins');
     await clawbackReviewReward(rev.user_id as string).catch(() => {});
@@ -512,6 +514,10 @@ export async function deleteReviewForRestaurant(userId: string, restaurantId: st
     .eq('user_id', userId)
     .eq('restaurant_id', restaurantId);
   if (error) throw error;
+  // Remove the matching activity_event(s) so they don't linger as 0★ ghosts.
+  await supabase.from('activity_events').delete()
+    .eq('user_id', userId).eq('restaurant_id', restaurantId).eq('type', 'review')
+    .then(() => {}, () => {});
   const { clawbackReviewReward } = await import('./coins');
   await clawbackReviewReward(userId).catch(() => {});
 }

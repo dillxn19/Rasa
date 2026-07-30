@@ -25,6 +25,7 @@ export function FeedCard({ item, onLike }: FeedCardProps) {
       rating: item.review?.rating ?? 0,
       content: item.review?.content,
       photos: item.review?.photos ?? [],
+      dishes: (item.review as { dishes_mentioned?: string[] } | undefined)?.dishes_mentioned ?? [],
       createdAt: item.created_at,
       likeCount: item.review?.like_count ?? 0,
       commentCount: item.review?.comment_count ?? 0,

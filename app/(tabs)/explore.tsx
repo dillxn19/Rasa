@@ -14,6 +14,7 @@ import { useTheme } from '@/theme/ThemeProvider';
 import { RText, Caption } from '@/components/ui/Text';
 import { Avatar } from '@/components/ui/Avatar';
 import { RestaurantCard } from '@/components/restaurants/RestaurantCard';
+import { RestaurantCardSkeleton } from '@/components/restaurants/RestaurantCardSkeleton';
 import { useAuthStore } from '@/stores/authStore';
 import { getRestaurantsByCategory, searchRestaurantsSupabase, getRestaurantsByIds } from '@/services/restaurants';
 import { getDiscoverUsers, followUser, unfollowUser, searchUsers } from '@/services/users';
@@ -569,9 +570,13 @@ export default function ExploreScreen() {
 
               <SortTabs mode={sortMode} onChange={(m) => { setSortMode(m); if (m === 'near') location.request(); }} />
 
-              {catLoading || (orderedResults.length === 0 && googleFetching) ? (
-                <ActivityIndicator color={colors.primary} style={{ marginTop: spacing[10] }} />
-              ) : orderedResults.length === 0 ? (
+              {catLoading ? (
+                <View style={styles.restaurantGrid}>
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <View key={`sk-${i}`} style={styles.restaurantGridItem}><RestaurantCardSkeleton /></View>
+                  ))}
+                </View>
+              ) : orderedResults.length === 0 && !googleFetching ? (
                 <View style={styles.emptyState}>
                   <RText style={{ fontSize: 40, lineHeight: 52 }}>{activeCat.emoji}</RText>
                   <RText variant="titleMedium" style={{ marginTop: spacing[4] }}>
@@ -588,6 +593,10 @@ export default function ExploreScreen() {
                       <RestaurantCard restaurant={restaurant} distance={sortMode === 'near' ? distance : null} />
                     </View>
                   ))}
+                  {/* Ghost fillers while the Google gap-filler is still loading */}
+                  {googleFetching && Array.from({ length: Math.max(2, 6 - orderedResults.length) }).map((_, i) => (
+                    <View key={`sk-${i}`} style={styles.restaurantGridItem}><RestaurantCardSkeleton /></View>
+                  ))}
                 </View>
               )}
             </>
@@ -597,9 +606,13 @@ export default function ExploreScreen() {
             <>
               <SortTabs mode={sortMode} onChange={(m) => { setSortMode(m); if (m === 'near') location.request(); }} />
 
-              {dishLoading || (orderedResults.length === 0 && googleFetching) ? (
-                <ActivityIndicator color={colors.primary} style={{ marginTop: spacing[10] }} />
-              ) : orderedResults.length === 0 ? (
+              {dishLoading ? (
+                <View style={styles.restaurantGrid}>
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <View key={`sk-${i}`} style={styles.restaurantGridItem}><RestaurantCardSkeleton /></View>
+                  ))}
+                </View>
+              ) : orderedResults.length === 0 && !googleFetching ? (
                 <View style={styles.emptyState}>
                   <RText style={{ fontSize: 40, lineHeight: 52 }}>🍽️</RText>
                   <RText variant="titleMedium" style={{ marginTop: spacing[4] }}>
@@ -615,6 +628,9 @@ export default function ExploreScreen() {
                     <View key={restaurant.id} style={styles.restaurantGridItem}>
                       <RestaurantCard restaurant={restaurant} distance={sortMode === 'near' ? distance : null} />
                     </View>
+                  ))}
+                  {googleFetching && Array.from({ length: Math.max(2, 6 - orderedResults.length) }).map((_, i) => (
+                    <View key={`sk-${i}`} style={styles.restaurantGridItem}><RestaurantCardSkeleton /></View>
                   ))}
                 </View>
               )}

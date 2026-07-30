@@ -28,6 +28,7 @@ export interface ReviewPost {
   rating: number;
   content?: string | null;
   photos?: string[];
+  dishes?: string[];
   createdAt: string;
   likeCount?: number;
   commentCount?: number;
@@ -189,6 +190,18 @@ export function ReviewPostCard({
     </View>
   ) : null;
 
+  // ── Dish tags (what they ate) ──
+  const dishes = post.dishes ?? [];
+  const TagsBlock = dishes.length > 0 ? (
+    <View style={[isFeed && styles.textPad, styles.tagsRow]}>
+      {dishes.slice(0, 8).map((d, i) => (
+        <View key={`${d}-${i}`} style={styles.dishChip}>
+          <RText style={styles.dishChipText}>{d}</RText>
+        </View>
+      ))}
+    </View>
+  ) : null;
+
   // ── Actions row (shared) ──
   const Actions = (
     <View style={[styles.actions, isFeed && styles.actionsPad]}>
@@ -287,6 +300,7 @@ export function ReviewPostCard({
             </LinearGradient>
           )}
         </TouchableOpacity>
+        {TagsBlock}
         {TextBlock}
         {Actions}
         {ListSheet}
@@ -321,6 +335,7 @@ export function ReviewPostCard({
         </View>
       )}
 
+      {TagsBlock}
       {TextBlock}
       {Actions}
       {ListSheet}
@@ -357,6 +372,14 @@ const styles = StyleSheet.create({
   photos: { marginTop: spacing[3] },
   text: { lineHeight: 22 },
   textPad: { paddingHorizontal: spacing[4] },
+  tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: spacing[2] },
+  dishChip: {
+    backgroundColor: colors.gray100,
+    paddingHorizontal: spacing[2],
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+  },
+  dishChipText: { fontSize: 11, lineHeight: 15, color: colors.textTertiary, fontWeight: '500' },
 
   // Feed media
   feedMedia: { position: 'relative' },

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, StyleSheet, TextInput, TouchableOpacity, FlatList,
-  KeyboardAvoidingView, Platform, ActivityIndicator, Keyboard,
+  Platform, ActivityIndicator, Keyboard,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,13 +25,16 @@ export default function CommentsScreen() {
   const insets = useSafeAreaInsets();
   const [text, setText] = useState('');
   const [showReport, setShowReport] = useState(false);
-  // The keyboard already covers the home-indicator area, so only pad the
-  // composer for the safe area while the keyboard is hidden — otherwise it
-  // leaves a gap between the keyboard and the input.
-  const [kbVisible, setKbVisible] = useState(false);
+  // This screen is presented as a MODAL, where KeyboardAvoidingView's padding
+  // math is unreliable on iOS (the keyboard frame is in window coords while the
+  // modal is shifted) — so we track the real keyboard height and lift the
+  // composer by it. Android relies on the window's adjustResize.
+  const [kbHeight, setKbHeight] = useState(0);
   useEffect(() => {
-    const show = Keyboard.addListener('keyboardWillShow', () => setKbVisible(true));
-    const hide = Keyboard.addListener('keyboardWillHide', () => setKbVisible(false));
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const show = Keyboard.addListener(showEvt, (e) => setKbHeight(e.endCoordinates?.height ?? 0));
+    const hide = Keyboard.addListener(hideEvt, () => setKbHeight(0));
     return () => { show.remove(); hide.remove(); };
   }, []);
 
@@ -76,14 +79,7 @@ export default function CommentsScreen() {
         onClose={() => setShowReport(false)}
       />
 
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        // The KAV sits BELOW the header (a sibling above it), so it already
-        // measures its own on-screen origin — any positive offset just adds an
-        // equal-sized empty gap between the keyboard and the composer.
-        keyboardVerticalOffset={0}
-      >
+      <View style={{ flex: 1 }}>
         {isLoading ? (
           <ActivityIndicator color={colors.primary} style={{ marginTop: spacing[10] }} />
         ) : (
@@ -105,7 +101,7 @@ export default function CommentsScreen() {
         )}
 
         {/* Composer */}
-        <View style={[styles.composer, { paddingBottom: spacing[3] + (kbVisible ? 0 : insets.bottom) }]}>
+        <View style={[styles.composer, { marginBottom: Platform.OS === 'ios' ? kbHeight : 0, paddingBottom: spacing[3] + (kbHeight > 0 ? 0 : insets.bottom) }]}>
           <Avatar uri={profile?.avatar_url} name={profile?.display_name} size="sm" />
           <TextInput
             style={styles.input}
@@ -126,7 +122,7 @@ export default function CommentsScreen() {
               : <Ionicons name="arrow-up" size={20} color={colors.white} />}
           </TouchableOpacity>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }

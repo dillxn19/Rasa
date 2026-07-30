@@ -404,6 +404,21 @@ function buildSlides(recap: RecapData, handle?: string): React.ReactNode[] {
           <Caption color={colors.whiteTransparent80} style={{ marginTop: spacing[3] }}>
             {cat.count} {cat.count === 1 ? 'visit' : 'visits'} this month
           </Caption>
+
+          {recap.topCategories.length > 1 && (
+            <View style={styles.catList}>
+              {recap.topCategories.slice(0, 3).map((c, i) => (
+                <View key={c.key} style={styles.catListRow}>
+                  <RText style={styles.catListRank}>{i + 1}</RText>
+                  <RText style={styles.catListEmoji}>{CATEGORY_EMOJI[c.key] ?? '🍽️'}</RText>
+                  <RText style={styles.catListName} numberOfLines={1}>
+                    {CATEGORY_LABELS[c.key as keyof typeof CATEGORY_LABELS] ?? c.key}
+                  </RText>
+                  <RText style={styles.catListCount}>{c.count}</RText>
+                </View>
+              ))}
+            </View>
+          )}
         </Animated.View>
       </View>
     );
@@ -423,18 +438,30 @@ function buildSlides(recap: RecapData, handle?: string): React.ReactNode[] {
           </View>
           <View style={styles.explorerDivider} />
           <View style={styles.explorerStat}>
+            <RText style={styles.explorerNum}>{recap.cuisinesTried}</RText>
+            <Caption color={colors.whiteTransparent80}>
+              {recap.cuisinesTried === 1 ? 'cuisine' : 'cuisines'}
+            </Caption>
+          </View>
+          <View style={styles.explorerDivider} />
+          <View style={styles.explorerStat}>
             <RText style={styles.explorerNum}>{recap.coinsEarned.toLocaleString()}</RText>
             <Caption color={colors.whiteTransparent80}>🪙 earned</Caption>
           </View>
         </View>
         {recap.cities.length > 0 && (
-          <View style={styles.cityChips}>
-            {recap.cities.slice(0, 6).map(c => (
-              <View key={c} style={styles.cityChip}>
-                <RText variant="labelSmall" color={colors.white}>{c}</RText>
-              </View>
-            ))}
-          </View>
+          <>
+            <Caption color={colors.whiteTransparent80} align="center" style={{ marginTop: spacing[6] }}>
+              Cities you ate your way through
+            </Caption>
+            <View style={styles.cityChips}>
+              {recap.cities.map(c => (
+                <View key={c} style={styles.cityChip}>
+                  <RText variant="labelSmall" color={colors.white}>{c}</RText>
+                </View>
+              ))}
+            </View>
+          </>
         )}
       </Animated.View>
     </View>
@@ -455,10 +482,18 @@ function buildSlides(recap: RecapData, handle?: string): React.ReactNode[] {
             <SummaryStat value={String(recap.cities.length)} label={recap.cities.length === 1 ? 'city' : 'cities'} />
             <SummaryStat value={recap.coinsEarned.toLocaleString()} label="🪙 earned" />
           </View>
-          {recap.topRestaurant && (
-            <View style={styles.summaryLine}>
-              <RText style={styles.summaryLineLabel}>Top spot</RText>
-              <RText style={styles.summaryLineValue} numberOfLines={1}>{recap.topRestaurant.name}</RText>
+          {recap.topRestaurants.length > 0 && (
+            <View style={styles.summaryTop3}>
+              <RText style={styles.summaryLineLabel}>Top spots</RText>
+              {recap.topRestaurants.slice(0, 3).map((r, i) => (
+                <View key={r.id} style={styles.summaryRankRow}>
+                  <RText style={styles.summaryRankNum}>{i + 1}</RText>
+                  <RText style={styles.summaryRankName} numberOfLines={1}>{r.name}</RText>
+                  <RText style={styles.summaryRankScore}>
+                    {r.rating % 1 === 0 ? r.rating.toFixed(0) : r.rating.toFixed(1)}★
+                  </RText>
+                </View>
+              ))}
             </View>
           )}
           {recap.topArea && (
@@ -478,7 +513,7 @@ function buildSlides(recap: RecapData, handle?: string): React.ReactNode[] {
           {recap.cities.length > 0 && (
             <View style={styles.summaryLine}>
               <RText style={styles.summaryLineLabel}>Cities</RText>
-              <RText style={styles.summaryLineValue} numberOfLines={1}>{recap.cities.join(', ')}</RText>
+              <RText style={[styles.summaryLineValue, styles.summaryCitiesValue]}>{recap.cities.join(', ')}</RText>
             </View>
           )}
           <RText style={styles.summaryHandle}>{handle ? `@${handle}` : 'me'} · rasa.my</RText>
@@ -714,7 +749,23 @@ const styles = StyleSheet.create({
   },
   summaryLineLabel: { color: colors.whiteTransparent80, fontSize: 13 },
   summaryLineValue: { color: colors.white, fontSize: 15, fontWeight: '700', flex: 1, textAlign: 'right', marginLeft: spacing[3] },
+  summaryCitiesValue: { textAlign: 'right', flexShrink: 1, maxWidth: '65%' },
   summaryHandle: { color: colors.whiteTransparent80, fontSize: 12, marginTop: spacing[3], textAlign: 'center' },
+
+  // Summary card — top 3 spots (Beli-style ranked list)
+  summaryTop3: { paddingTop: spacing[2], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.2)', marginTop: spacing[1] },
+  summaryRankRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing[2] },
+  summaryRankNum: { color: colors.whiteTransparent80, fontSize: 14, fontWeight: '800', width: 20 },
+  summaryRankName: { color: colors.white, fontSize: 15, fontWeight: '700', flex: 1, marginRight: spacing[2] },
+  summaryRankScore: { color: colors.white, fontSize: 14, fontWeight: '800' },
+
+  // Category slide — top 3 categories list
+  catList: { marginTop: spacing[8], width: 300, maxWidth: '100%', gap: spacing[3] },
+  catListRow: { flexDirection: 'row', alignItems: 'center' },
+  catListRank: { color: colors.whiteTransparent80, fontSize: 16, fontWeight: '800', width: 26 },
+  catListEmoji: { fontSize: 22, lineHeight: 28, marginRight: spacing[3] },
+  catListName: { color: colors.white, fontSize: 17, fontWeight: '700', flex: 1 },
+  catListCount: { color: colors.whiteTransparent80, fontSize: 14, fontWeight: '700' },
 
   // Locked state
   lockBadge: {

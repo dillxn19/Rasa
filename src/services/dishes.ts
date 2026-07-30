@@ -103,6 +103,25 @@ export async function tagDish(params: {
   return (data as string) ?? null;
 }
 
+/**
+ * The dishes a user tagged at a restaurant (from the dish graph). Used to
+ * pre-fill the review editor for reviews created before dish tags were also
+ * stored on the review row (dishes_mentioned).
+ */
+export async function getUserDishTagsForRestaurant(
+  userId: string,
+  restaurantId: string,
+): Promise<{ id: string; name: string }[]> {
+  const { data } = await supabase
+    .from('restaurant_dish_tags')
+    .select('dish_id, dishes:dishes!dish_id ( id, name )')
+    .eq('user_id', userId)
+    .eq('restaurant_id', restaurantId);
+  return ((data ?? []) as any[])
+    .map(r => ({ id: r.dishes?.id ?? r.dish_id, name: r.dishes?.name as string }))
+    .filter(d => !!d.name);
+}
+
 export async function getTopDishes(limit = 10): Promise<Dish[]> {
   const { data, error } = await supabase
     .from('dishes')

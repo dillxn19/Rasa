@@ -27,6 +27,18 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "//": "[USER] From App Store Connect. appleId = your Apple account email; ascAppId = the app's numeric ID (App Store Connect > App > App Information > Apple ID); appleTeamId = Membership > Team ID.",
+        "appleId": "YOUR_APPLE_ID_EMAIL",
+        "ascAppId": "YOUR_APP_STORE_CONNECT_APP_ID",
+        "appleTeamId": "YOUR_APPLE_TEAM_ID"
+      },
+      "android": {
+        "//": "[USER] Create a Google Play service-account JSON (Play Console > Setup > API access), save it OUTSIDE git, and point serviceAccountKeyPath at it. Use track internal for the first upload, then production.",
+        "serviceAccountKeyPath": "./play-service-account.json",
+        "track": "internal"
+      }
+    }
   }
 }

@@ -16,7 +16,7 @@ export async function getHomeFeed(userId: string, page = 0, limit = 20): Promise
   // Filter out 'visit' events — every review creates both a 'review' + 'visit' event
   const rows = (data as Record<string, unknown>[]).filter(row => row.event_type !== 'visit');
 
-  const items = rows.map(row => ({
+  const items = (rows.map(row => ({
     id: row.event_id as string,
     type: row.event_type as FeedItem['type'],
     created_at: row.created_at as string,
@@ -46,9 +46,44 @@ export async function getHomeFeed(userId: string, page = 0, limit = 20): Promise
     } : undefined,
     badge: row.badge_name ? { name: row.badge_name as string } : undefined,
     data: (row.data as Record<string, unknown>) ?? {},
-  })) as FeedItem[];
+  })) as FeedItem[]).filter(dropOrphanReview);
 
-  return attachLikedState(items, userId);
+  return attachDishes(await attachLikedState(items, userId));
+}
+
+/**
+ * Drops review events whose review no longer exists (deleted) — those come back
+ * from a LEFT JOIN as a null/0-rating "ghost" and would otherwise render as a
+ * 0★ card in the feed. Non-review events always pass.
+ */
+function dropOrphanReview(item: { type: string; review?: { rating?: number | null } | null }): boolean {
+  if (item.type !== 'review') return true;
+  return !!item.review && (item.review.rating ?? 0) > 0;
+}
+
+/**
+ * The get_home_feed RPC returns flat review columns without dishes_mentioned, so
+ * the dish-tag chips wouldn't show in the feed (they do on profile/activity,
+ * which select `*`). Fetch them in one extra query and merge — works for every
+ * feed path without changing the RPC.
+ */
+async function attachDishes(items: FeedItem[]): Promise<FeedItem[]> {
+  const reviewIds = items.flatMap(i => i.review ? [i.review.id] : []);
+  if (!reviewIds.length) return items;
+
+  const { data } = await supabase
+    .from('reviews')
+    .select('id, dishes_mentioned')
+    .in('id', reviewIds);
+
+  const map = new Map((data ?? []).map((r: { id: string; dishes_mentioned: string[] | null }) =>
+    [r.id, r.dishes_mentioned ?? []]));
+
+  return items.map(item =>
+    item.review
+      ? { ...item, review: { ...item.review, dishes_mentioned: map.get(item.review.id) ?? [] } }
+      : item,
+  );
 }
 
 async function attachLikedState(items: FeedItem[], userId: string): Promise<FeedItem[]> {
@@ -85,7 +120,7 @@ async function getFollowsActivityFallback(userId: string, page = 0, limit = 20):
       id, type, created_at, data,
       user:users!user_id(id, username, display_name, avatar_url),
       restaurant:restaurants!restaurant_id(id, name, slug, cover_photo_url, category, overall_rating),
-      review:reviews!review_id(id, rating, content, photos, like_count, comment_count),
+      review:reviews!review_id(id, rating, content, photos, dishes_mentioned, like_count, comment_count),
       list:lists!list_id(id, title, cover_photo_url, restaurant_count),
       badge:badges!badge_id(id, name, icon_emoji, category)
     `)
@@ -95,17 +130,19 @@ async function getFollowsActivityFallback(userId: string, page = 0, limit = 20):
     .order('created_at', { ascending: false })
     .range(page * limit, (page + 1) * limit - 1);
 
-  const items = (data?.map(row => ({
-    id: row.id,
-    type: row.type,
-    created_at: row.created_at,
-    actor: row.user,
-    restaurant: row.restaurant,
-    review: row.review,
-    list: row.list,
-    badge: row.badge,
-    data: row.data ?? {},
-  })) ?? []) as unknown as FeedItem[];
+  const items = ((data ?? [])
+    .map(row => ({
+      id: row.id,
+      type: row.type,
+      created_at: row.created_at,
+      actor: row.user,
+      restaurant: row.restaurant,
+      review: row.review,
+      list: row.list,
+      badge: row.badge,
+      data: row.data ?? {},
+    }))
+    .filter(dropOrphanReview) as unknown) as FeedItem[];
 
   return attachLikedState(items, userId);
 }
@@ -122,7 +159,7 @@ export async function getGlobalFeed(page = 0, limit = 20): Promise<FeedItem[]> {
         id, name, slug, cover_photo_url, category, overall_rating
       ),
       review:reviews!review_id (
-        id, rating, content, photos, like_count, comment_count
+        id, rating, content, photos, dishes_mentioned, like_count, comment_count
       ),
       list:lists!list_id (
         id, title, cover_photo_url, restaurant_count
@@ -137,7 +174,7 @@ export async function getGlobalFeed(page = 0, limit = 20): Promise<FeedItem[]> {
 
   if (error) throw error;
 
-  return (data?.map(row => ({
+  const items = ((data ?? []).map(row => ({
     id: row.id,
     type: row.type,
     created_at: row.created_at,
@@ -147,7 +184,9 @@ export async function getGlobalFeed(page = 0, limit = 20): Promise<FeedItem[]> {
     list: row.list,
     badge: row.badge,
     data: row.data ?? {},
-  })) ?? []) as unknown as FeedItem[];
+  })).filter(dropOrphanReview) as unknown) as FeedItem[];
+
+  return attachDishes(items);
 }
 
 export async function getNotifications(userId: string, page = 0): Promise<{

@@ -13,12 +13,12 @@
         "./assets/*"
       ]
     },
-    "types": [
-      "jest/globals"
-    ],
     "target": "esnext",
     "module": "esnext",
     "moduleResolution": "bundler",
+    "types": [
+      "jest/globals"
+    ],
     "allowImportingTsExtensions": true,
     "noUnusedLocals": false,
     "noUnusedParameters": false
