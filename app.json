@@ -10,7 +10,7 @@
     "splash": {
       "image": "./assets/images/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#E8452A"
+      "backgroundColor": "#B90003"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -33,7 +33,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#E8452A"
+        "backgroundColor": "#B90003"
       },
       "package": "com.rasamalaysia.app",
       "versionCode": 1,
