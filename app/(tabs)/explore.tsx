@@ -257,11 +257,12 @@ export default function ExploreScreen() {
     staleTime: Infinity,
   });
   const { data: googleSupplement, isFetching: googleFetching } = useQuery({
-    queryKey: ['exploreGoogle', view, city, activeCat?.key, activeDish?.name],
+    queryKey: ['exploreGoogle', view, city, activeCat?.key, activeDish?.name, halalOnly],
     queryFn: () => browseGoogle({
       ...(view === 'dish' ? { dish: activeDish!.name } : { category: activeCat!.key }),
       city,
       lat: location.coords?.lat, lng: location.coords?.lng,
+      halal: halalOnly,
     }),
     enabled: googleFill && (
       (view === 'category' && !!activeCat) || (view === 'dish' && !!activeDish)

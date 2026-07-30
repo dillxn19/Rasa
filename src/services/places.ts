@@ -95,7 +95,7 @@ export async function resolvePlace(
  * so Explore renders normal cards. Best-effort — returns [] on failure.
  */
 export async function browseGoogle(
-  opts: { category?: string; dish?: string; city: string; lat?: number; lng?: number },
+  opts: { category?: string; dish?: string; city: string; lat?: number; lng?: number; halal?: boolean },
 ): Promise<Restaurant[]> {
   const { data, error } = await supabase.functions.invoke('browse-google', { body: opts });
   if (error || !data?.rows) return [];

@@ -49,12 +49,15 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
-    const { category, dish, city, lat, lng } = await req.json();
+    const { category, dish, city, lat, lng, halal } = await req.json();
     const cityName = String(city ?? 'Kuala Lumpur').trim();
     const term = dish
       ? String(dish).trim()
       : CATEGORY_TERM[String(category ?? '')] ?? String(category ?? 'restaurant');
-    const textQuery = `best ${term} in ${cityName}`;
+    // When the user's Explore is halal-filtered, search halal-specific so Google
+    // actually returns halal spots (which we then tag muslim-friendly).
+    const wantHalal = halal === true;
+    const textQuery = `best ${wantHalal ? 'halal ' : ''}${term} in ${cityName}`;
 
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
@@ -94,7 +97,7 @@ Deno.serve(async (req) => {
         description: p.editorialSummary?.text ?? null,
         category: cat,
         cuisines: mapCuisines(p.primaryType, p.types),
-        dietary_options: mapDietary(name, cat, p.editorialSummary?.text ?? '', p.types ?? []),
+        dietary_options: mapDietary(name, cat, p.editorialSummary?.text ?? '', p.types ?? [], wantHalal),
         price_range: mapPriceRange(p.priceLevel) ?? '$$',
         price_level: priceLevelToInt(p.priceLevel),
         address: p.formattedAddress ?? '',

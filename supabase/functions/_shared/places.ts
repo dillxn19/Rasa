@@ -39,7 +39,7 @@ export function mapCategory(primaryType: string | undefined, types: string[] = [
 // a mamak, which in Malaysia is Indian-Muslim and conventionally halal), and we
 // suppress any claim when there are clear non-halal signals (pork, BKT, bar, etc.).
 export function mapDietary(
-  name = '', category = '', editorial = '', types: string[] = [],
+  name = '', category = '', editorial = '', types: string[] = [], halalHint = false,
 ): string[] {
   const hay = `${name} ${editorial} ${types.join(' ')}`.toLowerCase();
 
@@ -56,6 +56,11 @@ export function mapDietary(
 
   // Mamak = Indian-Muslim; conventionally muslim-friendly in Malaysia.
   if (category === 'mamak') return ['muslim_friendly'];
+
+  // Came from a halal-specific search and shows no non-halal signal → trust it.
+  // (Lets a halal-filtered Explore actually surface Google results instead of
+  // starving, since generic Google places almost never self-declare "halal".)
+  if (halalHint) return ['muslim_friendly'];
 
   // Otherwise: make NO halal claim (safer to under-claim than to mislead).
   return [];
