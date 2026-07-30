@@ -256,10 +256,12 @@ export default function ProfileScreen() {
     enabled: !!profile,
   });
 
+  // Load upfront (not just on the Lists tab) so the tab count is accurate —
+  // profile.total_lists is a denormalized counter that isn't maintained.
   const { data: userLists } = useQuery({
     queryKey: queryKeys.userLists(profile?.id ?? ''),
     queryFn: () => getUserLists(profile!.id),
-    enabled: !!profile && activeTab === 'lists',
+    enabled: !!profile,
   });
 
   const { data: tasteMatches } = useQuery({
@@ -294,7 +296,7 @@ export default function ProfileScreen() {
     { key: 'reviews', label: 'Activity', count: profile.total_reviews },
     { key: 'rankings', label: 'Ratings', count: profile.total_reviews },
     { key: 'saved', label: 'Saved', count: savedRestaurants?.length ?? 0 },
-    { key: 'lists', label: 'Lists', count: profile.total_lists },
+    { key: 'lists', label: 'Lists', count: userLists?.length ?? profile.total_lists },
   ];
 
   return (

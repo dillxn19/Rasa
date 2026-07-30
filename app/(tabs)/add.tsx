@@ -7,6 +7,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -350,6 +351,21 @@ export default function AddReviewScreen() {
     }, 300);
   }, []);
 
+  // Resize + compress before upload: far smaller files → faster upload now and
+  // faster load in the feed/review later. Also normalizes HEIC → JPEG. Falls
+  // back to the original uri if manipulation fails.
+  const compressForUpload = async (uri: string): Promise<string> => {
+    try {
+      const r = await manipulateAsync(uri, [{ resize: { width: 1440 } }], {
+        compress: 0.6,
+        format: SaveFormat.JPEG,
+      });
+      return r.uri;
+    } catch {
+      return uri;
+    }
+  };
+
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
@@ -362,11 +378,9 @@ export default function AddReviewScreen() {
       setUploading(true);
       try {
         for (const asset of result.assets) {
-          const response = await fetch(asset.uri);
+          const response = await fetch(await compressForUpload(asset.uri));
           const arrayBuffer = await response.arrayBuffer();
-          const ext = asset.uri.split('.').pop()?.toLowerCase() ?? 'jpg';
-          const mime = ext === 'png' ? 'image/png' : ext === 'heic' ? 'image/heic' : 'image/jpeg';
-          const url = await uploadReviewPhoto(profile.id, arrayBuffer, mime);
+          const url = await uploadReviewPhoto(profile.id, arrayBuffer, 'image/jpeg');
           // Scan for inappropriate content before showing it (fails open).
           const safe = await moderateImage(url);
           if (!safe) {
@@ -394,7 +408,7 @@ export default function AddReviewScreen() {
       setUploading(true);
       try {
         const asset = result.assets[0];
-        const response = await fetch(asset.uri);
+        const response = await fetch(await compressForUpload(asset.uri));
         const arrayBuffer = await response.arrayBuffer();
         const url = await uploadReviewPhoto(profile.id, arrayBuffer, 'image/jpeg');
         const safe = await moderateImage(url);

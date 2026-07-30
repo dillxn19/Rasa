@@ -81,6 +81,11 @@ export function RankCompareModal({
     setHi(nextHi);
   };
 
+  // "Too tough to call" → tie with THIS comparison: place the new spot right
+  // next to it and finish (Beli-style per-comparison skip — not abandoning the
+  // whole ranking, unlike `skip` below).
+  const tooTough = () => commit(mid);
+
   // Skip → drop it at the bottom of the tier (still gets a score).
   const skip = () => bucket && commit(bucket.length);
 
@@ -127,10 +132,19 @@ export function RankCompareModal({
                 <Caption color={colors.textTertiary} style={{ marginTop: 2 }}>already on your list</Caption>
               </TouchableOpacity>
 
-              <TouchableOpacity onPress={skip} disabled={saving} style={{ marginTop: spacing[5] }}>
+              <TouchableOpacity
+                onPress={tooTough}
+                disabled={saving}
+                style={styles.tooToughBtn}
+                activeOpacity={0.85}
+              >
+                <RText variant="labelMedium" color={colors.textPrimary} align="center">Too tough to call</RText>
+              </TouchableOpacity>
+
+              <TouchableOpacity onPress={skip} disabled={saving} style={{ marginTop: spacing[3] }}>
                 {saving
                   ? <ActivityIndicator color={colors.textSecondary} />
-                  : <RText variant="labelMedium" color={colors.textSecondary} align="center">Skip ranking</RText>}
+                  : <RText variant="labelMedium" color={colors.textTertiary} align="center">Skip ranking for now</RText>}
               </TouchableOpacity>
               {stepsLeft > 1 && (
                 <Caption color={colors.textTertiary} align="center" style={{ marginTop: spacing[2] }}>
@@ -170,6 +184,14 @@ const styles = StyleSheet.create({
     marginTop: spacing[4],
     borderWidth: 1,
     borderColor: colors.border,
+  },
+  tooToughBtn: {
+    marginTop: spacing[5],
+    paddingVertical: spacing[3],
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.gray50,
   },
   vsRow: { flexDirection: 'row', alignItems: 'center', marginTop: spacing[4] },
   vsLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.border },
