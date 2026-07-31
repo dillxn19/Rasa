@@ -1078,17 +1078,21 @@ function RankingsTab({ reviews, userId, location }: { reviews: Review[]; userId:
     return cats.includes((r as any).restaurant?.category ?? '');
   });
 
-  // Rank uses the fine-grained rank_score (set by pairwise comparisons),
-  // falling back to rating*2 for reviews that predate ranking.
+  // A higher star rating ALWAYS ranks above a lower one — including half-stars
+  // (4 above 3.5). rank_score only refines ties within the SAME rating; on its
+  // own it can't, because the rank_score bands overlap for half-star ratings
+  // (3.5 → 7.0 lands inside the 4★ band). So sort by rating first, then score.
   const scoreOf = (r: Review) => r.rank_score ?? (r.rating ?? 0) * 2;
+  const byRank = (a: Review, b: Review) =>
+    (b.rating ?? 0) - (a.rating ?? 0) || scoreOf(b) - scoreOf(a);
   const rankOf = new Map(
-    [...filtered].sort((a, b) => scoreOf(b) - scoreOf(a)).map((r, i) => [r.id, i + 1]),
+    [...filtered].sort(byRank).map((r, i) => [r.id, i + 1]),
   );
 
   const sorted =
     mode === 'distance' && coords
       ? byDistance(filtered, coords, r => ({ lat: r.restaurant?.latitude, lng: r.restaurant?.longitude }))
-      : [...filtered].sort((a, b) => scoreOf(b) - scoreOf(a));
+      : [...filtered].sort(byRank);
 
   return (
     <View style={{ paddingTop: spacing[2] }}>
