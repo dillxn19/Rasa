@@ -6,6 +6,7 @@ import type {
   DbPopularDish, DbComment, TasteProfileType,
   RestaurantCategory, CuisineType, DietaryOption, PriceRange,
   FeedItemType, DbActivityEvent,
+  DbDishRating, FoodTagType, DbUserTrailProgress,
 } from './database';
 
 // Re-export database types

@@ -54,31 +54,23 @@ export function RText({
   );
 }
 
-// Convenience wrappers for common patterns
-export const H1 = ({ children, style }: { children: React.ReactNode; style?: TextStyle }) => (
-  <RText variant="h1" style={style}>{children}</RText>
+// Convenience wrappers for common patterns. They accept + FORWARD the same
+// layout props as RText (align / numberOfLines / color) — otherwise those props
+// are silently dropped and truncation/centering never happens.
+type WrapProps = {
+  children: React.ReactNode;
+  style?: TextStyle | TextStyle[];
+  color?: string;
+  align?: 'left' | 'center' | 'right';
+  numberOfLines?: number;
+};
+
+export const H1 = ({ children, ...p }: WrapProps) => <RText variant="h1" {...p}>{children}</RText>;
+export const H2 = ({ children, ...p }: WrapProps) => <RText variant="h2" {...p}>{children}</RText>;
+export const H3 = ({ children, ...p }: WrapProps) => <RText variant="h3" {...p}>{children}</RText>;
+export const H4 = ({ children, ...p }: WrapProps) => <RText variant="h4" {...p}>{children}</RText>;
+export const Body = ({ children, ...p }: WrapProps) => <RText variant="bodyMedium" {...p}>{children}</RText>;
+export const Caption = ({ children, color, ...p }: WrapProps) => (
+  <RText variant="caption" color={color ?? colors.textSecondary} {...p}>{children}</RText>
 );
-export const H2 = ({ children, style }: { children: React.ReactNode; style?: TextStyle }) => (
-  <RText variant="h2" style={style}>{children}</RText>
-);
-export const H3 = ({ children, style }: { children: React.ReactNode; style?: TextStyle }) => (
-  <RText variant="h3" style={style}>{children}</RText>
-);
-export const H4 = ({ children, style }: { children: React.ReactNode; style?: TextStyle }) => (
-  <RText variant="h4" style={style}>{children}</RText>
-);
-export const Body = ({ children, style, color, numberOfLines }: {
-  children: React.ReactNode; style?: TextStyle; color?: string; numberOfLines?: number;
-}) => (
-  <RText variant="bodyMedium" color={color} style={style} numberOfLines={numberOfLines}>{children}</RText>
-);
-export const Caption = ({ children, style, color }: {
-  children: React.ReactNode; style?: TextStyle; color?: string;
-}) => (
-  <RText variant="caption" color={color ?? colors.textSecondary} style={style}>{children}</RText>
-);
-export const Label = ({ children, style, color }: {
-  children: React.ReactNode; style?: TextStyle; color?: string;
-}) => (
-  <RText variant="labelMedium" color={color} style={style}>{children}</RText>
-);
+export const Label = ({ children, ...p }: WrapProps) => <RText variant="labelMedium" {...p}>{children}</RText>;

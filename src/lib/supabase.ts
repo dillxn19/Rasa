@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { DbUser, DbRestaurant, DbReview, DbList, DbNotification, DbActivityEvent } from '@/types/database';
+import type { Database } from '@/types/database.generated';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
@@ -9,38 +9,8 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables. Copy .env.example to .env and fill in values.');
 }
 
-// Typed database schema for Supabase client
-export interface Database {
-  public: {
-    Tables: {
-      users: { Row: DbUser; Insert: Partial<DbUser>; Update: Partial<DbUser> };
-      restaurants: { Row: DbRestaurant; Insert: Partial<DbRestaurant>; Update: Partial<DbRestaurant> };
-      reviews: { Row: DbReview; Insert: Partial<DbReview>; Update: Partial<DbReview> };
-      lists: { Row: DbList; Insert: Partial<DbList>; Update: Partial<DbList> };
-      notifications: { Row: DbNotification; Insert: Partial<DbNotification>; Update: Partial<DbNotification> };
-      activity_events: { Row: DbActivityEvent; Insert: Partial<DbActivityEvent>; Update: Partial<DbActivityEvent> };
-    };
-    Functions: {
-      get_home_feed: {
-        Args: { p_user_id: string; p_limit?: number; p_offset?: number };
-        Returns: unknown[];
-      };
-      generate_recommendations: {
-        Args: { p_user_id: string };
-        Returns: void;
-      };
-      calculate_taste_similarity: {
-        Args: { p_user_id_1: string; p_user_id_2: string };
-        Returns: number;
-      };
-      get_nearby_restaurants: {
-        Args: { p_lat: number; p_lng: number; p_radius_km?: number; p_limit?: number };
-        Returns: unknown[];
-      };
-      auth_user_id: { Args: Record<string, never>; Returns: string };
-    };
-  };
-}
+// Full schema, auto-generated from the live DB (npm run supabase:gen-types).
+export type { Database };
 
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
