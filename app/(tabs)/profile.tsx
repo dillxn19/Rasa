@@ -117,6 +117,7 @@ export default function ProfileScreen() {
   };
 
   const handleUnlockWithCoins = async (feature: FeatureDef) => {
+    if (feature.id === 'streak_repair') { await handleRepairStreak('coins'); return; }
     const uid = useAuthStore.getState().profile?.id;
     if (!uid) return;
     const result = await unlockWithCoins(uid, feature);
@@ -131,6 +132,7 @@ export default function ProfileScreen() {
   };
 
   const handleUnlockWithReferral = async (feature: FeatureDef) => {
+    if (feature.id === 'streak_repair') { await handleRepairStreak('referral'); return; }
     const uid = useAuthStore.getState().profile?.id;
     if (!uid) return;
     const result = await unlockWithReferral(uid, feature);
@@ -150,18 +152,18 @@ export default function ProfileScreen() {
   };
 
   const [showPassport, setShowPassport] = useState(false);
-  const [showRepairConfirm, setShowRepairConfirm] = useState(false);
   const [repairing, setRepairing] = useState(false);
 
-  const handleRepairStreak = async () => {
+  const handleRepairStreak = async (method: 'coins' | 'referral') => {
     if (!profile) return;
     setRepairing(true);
-    const result = await repairStreak(profile.id);
+    const result = await repairStreak(profile.id, method);
     setRepairing(false);
-    setShowRepairConfirm(false);
+    setGate(null);
     if (result.success) {
       qc.invalidateQueries({ queryKey: queryKeys.userPassport(profile.id) });
       qc.invalidateQueries({ queryKey: ['userCoins', profile.id] });
+      qc.invalidateQueries({ queryKey: ['referralUnlockCount', profile.id] });
       toast.success(result.message);
     } else {
       toast.error(result.message);
@@ -285,6 +287,15 @@ export default function ProfileScreen() {
   const streakWeeks = passport?.streak_days ?? 0;
   const streakBroken = isStreakBroken(streakWeeks, (passport?.last_activity_date as string | null) ?? null);
   const repairCost = streakRepairCost(streakWeeks);
+  // Streak repair reuses the referral-or-coins gate modal via a synthetic feature.
+  const streakRepairFeature: FeatureDef = {
+    id: 'streak_repair',
+    name: `Revive your ${streakWeeks}-week streak`,
+    emoji: '🔥',
+    description: 'Bring your streak back so your next review continues from where you left off, instead of resetting to week 1.',
+    referralsRequired: 1,
+    coinCost: repairCost,
+  };
 
   const tasteProfile = profile.taste_profile
     ? TASTE_PROFILE_LABELS[profile.taste_profile]
@@ -442,11 +453,11 @@ export default function ProfileScreen() {
             <StreakCard weeks={passport?.streak_days ?? 0} compact />
           </View>
 
-          {/* Streak lapsed → offer a coin repair so it isn't lost */}
+          {/* Streak lapsed → revive with a referral (cheap) or coins (expensive) */}
           {streakBroken && (
             <TouchableOpacity
               style={styles.repairBanner}
-              onPress={() => setShowRepairConfirm(true)}
+              onPress={() => setGate(streakRepairFeature)}
               activeOpacity={0.9}
             >
               <RText style={{ fontSize: 20, lineHeight: 26 }}>💔</RText>
@@ -454,10 +465,12 @@ export default function ProfileScreen() {
                 <RText variant="titleSmall" color={colors.textPrimary}>
                   Your {streakWeeks}-week streak lapsed
                 </RText>
-                <Caption color={colors.textSecondary}>Revive it before it resets</Caption>
+                <Caption color={colors.textSecondary}>
+                  {referralCredits >= 1 ? '1 referral or ' : ''}{repairCost} 🪙 to revive
+                </Caption>
               </View>
               <View style={styles.repairCta}>
-                <RText variant="labelMedium" color={colors.white}>Repair · {repairCost} 🪙</RText>
+                <RText variant="labelMedium" color={colors.white}>Revive 🔥</RText>
               </View>
             </TouchableOpacity>
           )}
@@ -714,15 +727,6 @@ export default function ProfileScreen() {
         onCancel={() => setReviewToDelete(null)}
       />
 
-      <ConfirmDialog
-        visible={showRepairConfirm}
-        title={`Repair your ${streakWeeks}-week streak?`}
-        message={`Spend ${repairCost} 🪙 to revive it — your next review will continue from week ${streakWeeks} instead of starting over.`}
-        confirmLabel={`Repair · ${repairCost} 🪙`}
-        loading={repairing}
-        onConfirm={handleRepairStreak}
-        onCancel={() => setShowRepairConfirm(false)}
-      />
 
       <ConfirmDialog
         visible={showDeleteConfirm}

@@ -332,9 +332,13 @@ export async function updateReviewStreak(userId: string): Promise<StreakResult> 
   return { weeks: newStreak, newWeek: true, milestone };
 }
 
-/** Coin cost to revive a broken streak — scales with its length, capped. */
+/**
+ * Coin cost to revive a broken streak. Coins are the EXPENSIVE path — a referral
+ * credit is the cheap alternative — so this is deliberately steep (starts above
+ * the 300/day earn cap and scales with streak length).
+ */
 export function streakRepairCost(weeks: number): number {
-  return Math.min(300, 50 + Math.max(0, weeks) * 25);
+  return Math.min(1000, 400 + Math.max(0, weeks) * 50);
 }
 
 /** Whether a streak is broken (missed the 7-day window) and worth repairing. */
@@ -351,12 +355,18 @@ export interface StreakRepairResult {
   newBalance?: number;
 }
 
+export type StreakRepairMethod = 'coins' | 'referral';
+
 /**
- * Spend coins to revive a broken weekly streak so the NEXT review continues it
- * (week N+1) instead of resetting to week 1. Only valid when the streak is
- * genuinely broken. Resets the streak clock to today but keeps its length.
+ * Revive a broken weekly streak so the NEXT review continues it (week N+1)
+ * instead of resetting to week 1. Two paths: a referral credit (cheap) or coins
+ * (expensive). Only valid when the streak is genuinely broken. Resets the streak
+ * clock to today but keeps its length.
  */
-export async function repairStreak(userId: string): Promise<StreakRepairResult> {
+export async function repairStreak(
+  userId: string,
+  method: StreakRepairMethod = 'coins',
+): Promise<StreakRepairResult> {
   const { data: passport } = await supabase
     .from('food_passports')
     .select('streak_days, last_activity_date')
@@ -370,11 +380,30 @@ export async function repairStreak(userId: string): Promise<StreakRepairResult> 
     return { success: false, message: 'Your streak is still active — nothing to repair.' };
   }
 
-  const cost = streakRepairCost(weeks);
-  const { spendCoins } = await import('./coins');
-  const spend = await spendCoins(userId, cost, 'streak_repair', `Repaired ${weeks}-week streak`);
-  if (!spend.success) {
-    return { success: false, message: `Not enough coins — you need ${cost} 🪙 to repair.`, newBalance: spend.newBalance };
+  let newBalance: number | undefined;
+
+  if (method === 'referral') {
+    // Consume one referral credit (a unique feature_unlocks row, source=referral).
+    const { getActivatedReferralCount, getReferralUnlockCount } = await import('./features');
+    const [activated, used] = await Promise.all([
+      getActivatedReferralCount(userId).catch(() => 0),
+      getReferralUnlockCount(userId).catch(() => 0),
+    ]);
+    if (activated - used < 1) {
+      return { success: false, message: 'No referral credits left — invite a friend or use coins.' };
+    }
+    const { error } = await supabase
+      .from('feature_unlocks')
+      .insert({ user_id: userId, feature: `streak_repair:${Date.now()}`, source: 'referral' });
+    if (error) return { success: false, message: 'Could not repair with a referral. Try again.' };
+  } else {
+    const cost = streakRepairCost(weeks);
+    const { spendCoins } = await import('./coins');
+    const spend = await spendCoins(userId, cost, 'streak_repair', `Repaired ${weeks}-week streak`);
+    if (!spend.success) {
+      return { success: false, message: `Not enough coins — you need ${cost} 🪙 to repair.`, newBalance: spend.newBalance };
+    }
+    newBalance = spend.newBalance;
   }
 
   const todayStr = new Date().toISOString().split('T')[0];
@@ -383,7 +412,7 @@ export async function repairStreak(userId: string): Promise<StreakRepairResult> 
     .update({ last_activity_date: todayStr, streak_week_start: todayStr, updated_at: new Date().toISOString() })
     .eq('user_id', userId);
 
-  return { success: true, message: `Streak revived — you're back to week ${weeks}! 🔥`, weeks, newBalance: spend.newBalance };
+  return { success: true, message: `Streak revived — you're back to week ${weeks}! 🔥`, weeks, newBalance };
 }
 
 export async function updatePushToken(userId: string, token: string): Promise<void> {
