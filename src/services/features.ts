@@ -39,16 +39,21 @@ export const FEATURES: Record<string, FeatureDef> = {
     description: 'Reveal the aggregate community rating on every restaurant.',
     referralsRequired: 1, coinCost: null, // referral-only — cannot be bought with coins
   },
-  // Dual-track: 1 referral OR coins.
+  // Dual-track: 1 referral OR coins (coins deliberately steep — they're easy to earn).
   taste_analytics: {
     id: 'taste_analytics', name: 'Food Passport', emoji: '📖',
     description: 'Your Food Passport: stamps, badges, streaks, plus deep stats on your palate, top cuisines and taste matches.',
-    referralsRequired: 1, coinCost: 1000,
+    referralsRequired: 1, coinCost: 6000,
   },
   monthly_recap: {
     id: 'monthly_recap', name: 'Monthly Recap', emoji: '✨',
     description: 'Your shareable wrapped: top places, cuisines, cities and stats.',
-    referralsRequired: 1, coinCost: 1500,
+    referralsRequired: 1, coinCost: 10000,
+  },
+  lists: {
+    id: 'lists', name: 'Custom Lists', emoji: '📝',
+    description: 'Create and share your own themed lists of places — e.g. "Best late-night eats in KL".',
+    referralsRequired: 1, coinCost: 8000,
   },
 };
 

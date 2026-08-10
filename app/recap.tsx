@@ -27,6 +27,15 @@ import { CATEGORY_LABELS } from '@/types';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
+// Recap is a card pushed on the root (tabs) stack. To send the user to the Add
+// tab we must POP back to the tabs root first, then select the tab — otherwise
+// pushing '/(tabs)/add' re-stacks the whole tab navigator (nested tabs / popup
+// loop). dismissAll unwinds any pushed cards; navigate then picks the tab.
+function goRateAPlace() {
+  try { if (router.canDismiss()) router.dismissAll(); } catch { /* not in a stack */ }
+  router.navigate('/(tabs)/add');
+}
+
 const CATEGORY_EMOJI: Record<string, string> = {
   hawker: '🍜', mamak: '🥛', cafe: '☕', kopitiam: '🍳', fine_dining: '🥂',
   food_court: '🍱', night_market: '🌙', restaurant: '🍽️', fast_food: '🍔', bar: '🍸',
@@ -590,7 +599,7 @@ function RecapLocked({ remaining }: { remaining: number }) {
         </Caption>
         <TouchableOpacity
           style={styles.lockBtn}
-          onPress={() => { router.back(); router.push('/(tabs)/add'); }}
+          onPress={goRateAPlace}
           activeOpacity={0.9}
         >
           <Ionicons name="add" size={18} color={colors.primary} />
@@ -653,7 +662,7 @@ function RecapNotReady() {
         </Caption>
         <TouchableOpacity
           style={styles.lockBtn}
-          onPress={() => { router.back(); router.push('/(tabs)/add'); }}
+          onPress={goRateAPlace}
           activeOpacity={0.9}
         >
           <Ionicons name="add" size={18} color={colors.primary} />
@@ -684,7 +693,7 @@ function EmptyRecap({ monthLabel }: { monthLabel: string }) {
         </Caption>
         <TouchableOpacity
           style={styles.emptyBtn}
-          onPress={() => { router.back(); router.push('/(tabs)/add'); }}
+          onPress={goRateAPlace}
           activeOpacity={0.9}
         >
           <RText variant="buttonMedium" color={colors.primary}>Rate a place</RText>

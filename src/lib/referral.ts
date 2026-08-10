@@ -1,4 +1,4 @@
-import { Share, InteractionManager } from 'react-native';
+import { Share } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Linking from 'expo-linking';
@@ -27,12 +27,14 @@ export function buildInviteLink(ref: string): string {
 export function shareInvite(ref: string): void {
   const link = buildInviteLink(ref);
   const message =
-    `Join Rasa 🍜 — a food social app for Malaysia (think Beli, but for our makan).\n` +
-    `Rate places, follow friends and find your next meal.\n` +
+    `Join Rasa 🍜 — the food social app for Malaysia.\n` +
+    `Rate places, follow friends and find your next great makan.\n` +
     `Use my code ${ref.toUpperCase()} or tap:\n${link}`;
-  InteractionManager.runAfterInteractions(() => {
-    setTimeout(() => { Share.share({ message }).catch(() => {}); }, 250);
-  });
+  // A short timeout lets any dismissing modal/sheet settle before the OS share
+  // sheet presents (presenting over a dismissing modal is a no-op on iOS). A
+  // plain setTimeout is more reliable here than runAfterInteractions, which can
+  // stall if an interaction never completes → the share silently never fires.
+  setTimeout(() => { Share.share({ message }).catch(() => {}); }, 300);
 }
 
 /** Copy the referral code to the clipboard. */

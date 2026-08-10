@@ -594,7 +594,11 @@ export default function ProfileScreen() {
             />
           )}
           {activeTab === 'lists' && (
-            <ListsTab lists={userLists ?? []} />
+            <ListsTab
+              lists={userLists ?? []}
+              unlocked={isUnlocked('lists')}
+              onUnlock={() => setGate(FEATURES.lists)}
+            />
           )}
         </View>
       </ScrollView>
@@ -1225,8 +1229,31 @@ function SavedTab({ restaurants, dishes, location }: { restaurants: any[]; dishe
 
 // Lists are not shipped yet — surfaced as a "coming soon" teaser so users know
 // what Custom Lists will be.
-function ListsTab({ lists }: { lists: List[] }) {
-  // Custom Lists is available to everyone — curate + share themed collections.
+function ListsTab({ lists, unlocked, onUnlock }: { lists: List[]; unlocked: boolean; onUnlock: () => void }) {
+  // Custom Lists is a gated feature (unlock with a referral or coins).
+  if (!unlocked) {
+    return (
+      <View style={{ paddingHorizontal: spacing[6], paddingTop: spacing[10], alignItems: 'center' }}>
+        <RText style={{ fontSize: 44, lineHeight: 54 }}>📝</RText>
+        <RText variant="titleMedium" style={{ marginTop: spacing[3] }}>Custom Lists</RText>
+        <Caption color={colors.textSecondary} align="center" style={{ marginTop: spacing[2], maxWidth: 280, lineHeight: 20 }}>
+          Create and share your own themed lists of places — like “Best late-night eats in KL”.
+        </Caption>
+        <TouchableOpacity
+          onPress={onUnlock}
+          activeOpacity={0.9}
+          style={{
+            flexDirection: 'row', alignItems: 'center', marginTop: spacing[5],
+            backgroundColor: colors.primary, paddingHorizontal: spacing[5],
+            paddingVertical: spacing[3], borderRadius: radius.full,
+          }}
+        >
+          <Ionicons name="lock-open" size={16} color={colors.white} />
+          <RText variant="labelMedium" color={colors.white} style={{ marginLeft: spacing[2] }}>Unlock Lists</RText>
+        </TouchableOpacity>
+      </View>
+    );
+  }
   return (
     <View style={{ paddingHorizontal: spacing[4], paddingTop: spacing[2] }}>
       <TouchableOpacity style={styles.newListBtn} onPress={() => router.push('/list/new')} activeOpacity={0.85}>

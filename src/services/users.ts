@@ -338,7 +338,7 @@ export async function updateReviewStreak(userId: string): Promise<StreakResult> 
  * the 300/day earn cap and scales with streak length).
  */
 export function streakRepairCost(weeks: number): number {
-  return Math.min(1000, 400 + Math.max(0, weeks) * 50);
+  return Math.min(10000, 2000 + Math.max(0, weeks) * 500);
 }
 
 /** Whether a streak is broken (missed the 7-day window) and worth repairing. */
