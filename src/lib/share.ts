@@ -1,6 +1,6 @@
 import { Share, Linking, Platform } from 'react-native';
 
-const APP_URL = 'https://rasa.my';
+const APP_URL = 'https://rasamalaysia.org';
 
 export async function shareRestaurant(restaurantId: string, name: string): Promise<void> {
   const url = `${APP_URL}/restaurant/${restaurantId}`;
@@ -32,7 +32,7 @@ export async function shareReviewToWhatsApp(
   const lines = [
     `${stars} ${restaurantName}`,
     content ? `"${content}"` : null,
-    `— via Rasa 🍜 rasa.my`,
+    `— via Rasa 🍜 rasamalaysia.org`,
   ].filter(Boolean).join('\n');
 
   await shareViaWhatsApp(lines);

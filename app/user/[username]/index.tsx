@@ -146,7 +146,7 @@ export default function UserProfileScreen() {
               <View style={{ flexDirection: 'row', gap: spacing[2] }}>
                 <TouchableOpacity
                   style={styles.navBtn}
-                  onPress={() => shareViaWhatsApp(`Check out ${user.display_name}'s food reviews on Rasa! rasa.my/user/${user.username}`)}
+                  onPress={() => shareViaWhatsApp(`Check out ${user.display_name}'s food reviews on Rasa! rasamalaysia.org/user/${user.username}`)}
                 >
                   <Ionicons name="share-outline" size={22} color={colors.white} />
                 </TouchableOpacity>
@@ -176,7 +176,7 @@ export default function UserProfileScreen() {
                 {user.is_following && (
                   <TouchableOpacity
                     style={styles.messageBtn}
-                    onPress={() => shareViaWhatsApp(`Hey, check out ${user.display_name}'s food reviews on Rasa! rasa.my/user/${user.username}`)}
+                    onPress={() => shareViaWhatsApp(`Hey, check out ${user.display_name}'s food reviews on Rasa! rasamalaysia.org/user/${user.username}`)}
                   >
                     <RText style={{ fontSize: 18 }}>💬</RText>
                   </TouchableOpacity>

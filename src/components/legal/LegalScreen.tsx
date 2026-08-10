@@ -40,7 +40,7 @@ export function LegalScreen({
           </View>
         ))}
         <Caption color={colors.textTertiary} style={{ marginTop: spacing[2] }}>
-          Questions? Email hello@rasa.my
+          Questions? Email hello@rasamalaysia.org
         </Caption>
       </ScrollView>
     </SafeAreaView>

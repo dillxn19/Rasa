@@ -140,7 +140,7 @@ export default function ListShareScreen() {
               </Caption>
             )}
 
-            <RText style={styles.footer}>Find it on Rasa · rasa.my</RText>
+            <RText style={styles.footer}>Find it on Rasa · rasamalaysia.org</RText>
           </LinearGradient>
         </View>
       </ScrollView>

@@ -144,7 +144,7 @@ export function ReviewPostCard({
   const handleShare = async () => {
     if (!r) return;
     const rating = post.rating ? ` ⭐ ${post.rating}/5` : '';
-    await shareViaWhatsApp(`🍜 ${r.name}${rating}\n${post.actor.display_name} reviewed this on Rasa!\nrasa.my/restaurant/${r.id}`);
+    await shareViaWhatsApp(`🍜 ${r.name}${rating}\n${post.actor.display_name} reviewed this on Rasa!\nrasamalaysia.org/restaurant/${r.id}`);
   };
 
   const timeAgo = formatDistanceToNow(new Date(post.createdAt), { addSuffix: true });

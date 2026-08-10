@@ -218,7 +218,7 @@ export default function RestaurantScreen() {
 
   const handleWhatsAppShare = async () => {
     if (!restaurant) return;
-    await shareViaWhatsApp(`🍜 ${restaurant.name}\n⭐ ${restaurant.overall_rating.toFixed(1)} · ${restaurant.area ?? restaurant.city}\n\nCheck it out on Rasa: rasa.my/restaurant/${id}`);
+    await shareViaWhatsApp(`🍜 ${restaurant.name}\n⭐ ${restaurant.overall_rating.toFixed(1)} · ${restaurant.area ?? restaurant.city}\n\nCheck it out on Rasa: rasamalaysia.org/restaurant/${id}`);
   };
 
   const handleDirections = () => {

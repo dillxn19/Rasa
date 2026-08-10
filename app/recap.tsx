@@ -525,7 +525,7 @@ function buildSlides(recap: RecapData, handle?: string): React.ReactNode[] {
               <RText style={[styles.summaryLineValue, styles.summaryCitiesValue]}>{recap.cities.join(', ')}</RText>
             </View>
           )}
-          <RText style={styles.summaryHandle}>{handle ? `@${handle}` : 'me'} · rasa.my</RText>
+          <RText style={styles.summaryHandle}>{handle ? `@${handle}` : 'me'} · rasamalaysia.org</RText>
         </View>
       </Animated.View>
     </View>

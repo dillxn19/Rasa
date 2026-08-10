@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Linking from 'expo-linking';
 
 const PENDING_REFERRER_KEY = 'rasa_pending_referrer';
-const WEB_BASE = 'https://rasa.my';
+const WEB_BASE = 'https://rasamalaysia.org';
 
 /**
  * Public web link that carries the referral (opens the app if installed).
@@ -70,7 +70,7 @@ export async function clearPendingReferrer(): Promise<void> {
 
 /**
  * Extracts a `ref` username from an incoming deep/universal link, e.g.
- * `rasa://join?ref=alice` or `https://rasa.my/join?ref=alice`.
+ * `rasa://join?ref=alice` or `https://rasamalaysia.org/join?ref=alice`.
  */
 export function parseReferrerFromUrl(url: string | null): string | null {
   if (!url) return null;
