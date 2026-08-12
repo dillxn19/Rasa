@@ -20,6 +20,7 @@
       "bundleIdentifier": "com.rasamalaysia.app",
       "buildNumber": "1",
       "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "Rasa needs camera access to take photos of your food.",
         "NSPhotoLibraryUsageDescription": "Rasa needs photo library access to share your food photos.",
         "NSLocationWhenInUseUsageDescription": "Rasa uses your location to find restaurants near you.",
