@@ -219,7 +219,19 @@ export async function purchaseTheme(
   }
   if (theme.cost === 0) {
     await setActiveTheme(userId, theme.id);
-    return { success: true, message: 'Theme applied!', newBalance: 0 };
+    return { success: true, message: 'Theme applied!', newBalance: await getUserCoins(userId).catch(() => 0) };
+  }
+
+  // Already owned → just re-equip, NEVER charge again.
+  const { data: owned } = await supabase
+    .from('feature_unlocks')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('feature', `theme:${theme.id}`)
+    .maybeSingle();
+  if (owned) {
+    await setActiveTheme(userId, theme.id);
+    return { success: true, message: `${theme.name} equipped!`, newBalance: await getUserCoins(userId).catch(() => 0) };
   }
 
   const result = await spendCoins(userId, theme.cost, 'spend_theme', `Purchased theme: ${theme.name}`);
@@ -227,6 +239,20 @@ export async function purchaseTheme(
     return { success: false, message: `Not enough coins. Need ${theme.cost} Rasa Coins.`, newBalance: result.newBalance };
   }
 
+  // Record ownership so re-equipping is free forever.
+  await supabase.from('feature_unlocks')
+    .insert({ user_id: userId, feature: `theme:${theme.id}`, source: 'coins' })
+    .then(() => {}, () => {});
   await setActiveTheme(userId, theme.id);
-  return { success: true, message: `${theme.name} theme equipped!`, newBalance: result.newBalance };
+  return { success: true, message: `${theme.name} theme unlocked!`, newBalance: result.newBalance };
+}
+
+/** Theme ids the user already owns (bought), from feature_unlocks (`theme:<id>`). */
+export async function getOwnedThemes(userId: string): Promise<string[]> {
+  const { data } = await supabase
+    .from('feature_unlocks')
+    .select('feature')
+    .eq('user_id', userId)
+    .like('feature', 'theme:%');
+  return (data ?? []).map((r) => (r.feature as string).replace(/^theme:/, ''));
 }

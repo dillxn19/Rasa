@@ -12,12 +12,13 @@ import { colors, spacing, radius, shadows } from '@/theme';
 import { RText, Caption, H3 } from '@/components/ui/Text';
 import { useAuthStore } from '@/stores/authStore';
 import {
-  getUserCoins, getCoinHistory, purchaseTheme, SHOP_THEMES, type ThemeDef,
+  getUserCoins, getCoinHistory, purchaseTheme, getOwnedThemes, SHOP_THEMES, type ThemeDef,
 } from '@/services/coins';
 import {
   useFeatureAccess, unlockWithCoins, unlockWithReferral, FEATURES, type FeatureDef,
 } from '@/services/features';
 import { FeatureGateModal } from '@/components/ui/FeatureGateModal';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { shareInvite } from '@/lib/referral';
 import { toast } from '@/stores/toastStore';
 
@@ -31,6 +32,7 @@ export default function ShopScreen() {
   const [activeTheme, setActiveThemeLocal] = useState<string>(profile?.active_theme ?? 'default');
   const { isUnlocked, referralCredits } = useFeatureAccess();
   const [gate, setGate] = useState<FeatureDef | null>(null);
+  const [confirmTheme, setConfirmTheme] = useState<ThemeDef | null>(null);
 
   const handleUnlockWithCoins = async (feature: FeatureDef) => {
     if (!profile) return;
@@ -75,16 +77,18 @@ export default function ShopScreen() {
     enabled: !!profile,
   });
 
+  const { data: ownedThemes = [] } = useQuery({
+    queryKey: ['ownedThemes', profile?.id],
+    queryFn: () => getOwnedThemes(profile!.id),
+    enabled: !!profile,
+    staleTime: 1000 * 15,
+  });
+
   if (!profile) return null;
 
-  const handleThemePress = async (theme: ThemeDef) => {
-    if (theme.comingSoon) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-      toast.info('This theme is coming soon 👀', 'Coming soon');
-      return;
-    }
-    if (theme.id === activeTheme || purchasing) return;
-    const owned = theme.cost === 0 || coins >= theme.cost;
+  // Actually buy/equip a theme. purchaseTheme is idempotent — an owned theme is
+  // re-equipped for free, never re-charged.
+  const doThemePurchase = async (theme: ThemeDef) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setPurchasing(theme.id);
     try {
@@ -94,8 +98,9 @@ export default function ShopScreen() {
         setActiveThemeLocal(theme.id);
         qc.invalidateQueries({ queryKey: ['userCoins', profile.id] });
         qc.invalidateQueries({ queryKey: ['coinHistory', profile.id] });
+        qc.invalidateQueries({ queryKey: ['ownedThemes', profile.id] });
         await refreshProfile().catch(() => {});
-        toast.success(result.message, theme.cost > 0 && owned ? '🎉 Unlocked!' : 'Equipped');
+        toast.success(result.message);
       } else {
         toast.error(result.message, 'Not enough coins');
       }
@@ -103,6 +108,21 @@ export default function ShopScreen() {
       toast.error('Something went wrong. Try again.');
     } finally {
       setPurchasing(null);
+    }
+  };
+
+  const handleThemePress = (theme: ThemeDef) => {
+    if (theme.comingSoon) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      toast.info('This theme is coming soon 👀', 'Coming soon');
+      return;
+    }
+    if (theme.id === activeTheme || purchasing) return;
+    const isOwned = theme.cost === 0 || ownedThemes.includes(theme.id);
+    if (isOwned) {
+      doThemePurchase(theme); // free re-equip — no charge, no confirm
+    } else {
+      setConfirmTheme(theme); // costs coins → confirm first
     }
   };
 
@@ -191,6 +211,7 @@ export default function ShopScreen() {
             const canAfford = coins >= theme.cost;
             const isBuying = purchasing === theme.id;
             const isComingSoon = !!theme.comingSoon;
+            const isOwned = theme.cost > 0 && ownedThemes.includes(theme.id);
             return (
               <TouchableOpacity
                 key={theme.id}
@@ -233,6 +254,13 @@ export default function ShopScreen() {
                       <Ionicons name="checkmark" size={12} color={colors.white} />
                       <RText style={{ fontSize: 10, color: colors.white, fontWeight: '800', marginLeft: 2 }}>
                         EQUIPPED
+                      </RText>
+                    </View>
+                  ) : isOwned ? (
+                    <View style={styles.ownedThemeChip}>
+                      <Ionicons name="checkmark-circle" size={13} color={colors.success} />
+                      <RText style={{ fontSize: 10, color: colors.success, fontWeight: '800', marginLeft: 3 }}>
+                        OWNED · TAP TO EQUIP
                       </RText>
                     </View>
                   ) : (
@@ -294,6 +322,16 @@ export default function ShopScreen() {
           const r = profile?.referral_code ?? profile?.username;
           if (r) shareInvite(r);
         }}
+      />
+
+      <ConfirmDialog
+        visible={confirmTheme !== null}
+        title={`Buy the ${confirmTheme?.name ?? ''} theme?`}
+        message={`Spend ${confirmTheme?.cost?.toLocaleString()} 🪙 to unlock it. You'll own it permanently and can re-equip it any time for free.`}
+        confirmLabel={`Buy · ${confirmTheme?.cost?.toLocaleString()} 🪙`}
+        loading={!!purchasing}
+        onConfirm={() => { const t = confirmTheme; setConfirmTheme(null); if (t) doThemePurchase(t); }}
+        onCancel={() => setConfirmTheme(null)}
       />
     </SafeAreaView>
   );
@@ -514,6 +552,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     alignSelf: 'flex-start',
     backgroundColor: colors.primary,
+    borderRadius: radius.full,
+    paddingHorizontal: spacing[2],
+    paddingVertical: 2,
+  },
+  ownedThemeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: '#E6F4EA',
     borderRadius: radius.full,
     paddingHorizontal: spacing[2],
     paddingVertical: 2,
