@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/stores/authStore';
-import { spendCoins } from './coins';
+import { spendCoins, getUserCoins } from './coins';
 
 // Founder/admin usernames — always get full access to every gated feature and
 // unlockable, regardless of referrals/coins/DB flags.
@@ -110,6 +110,19 @@ export async function unlockWithCoins(
   if (feature.coinCost == null) {
     return { success: false, message: 'This feature can only be unlocked by referring friends.', newBalance: 0 };
   }
+  // Idempotency guard: if it's already unlocked, NEVER charge again (prevents
+  // the double-spend when the owned state is stale or bought from two places).
+  const { data: existing } = await supabase
+    .from('feature_unlocks')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('feature', feature.id)
+    .maybeSingle();
+  if (existing) {
+    const balance = await getUserCoins(userId).catch(() => 0);
+    return { success: true, message: `${feature.name} is already unlocked.`, newBalance: balance };
+  }
+
   const spend = await spendCoins(userId, feature.coinCost, 'spend_theme', `Unlocked ${feature.name}`);
   if (!spend.success) {
     return { success: false, message: `Not enough coins. Need ${feature.coinCost} 🪙.`, newBalance: spend.newBalance };

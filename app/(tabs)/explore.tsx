@@ -169,6 +169,7 @@ export default function ExploreScreen() {
   const [city, setCity] = useState(profile?.city ?? 'Kuala Lumpur');
   const [activeCat, setActiveCat] = useState<CategoryDef | null>(null);
   const [activeDish, setActiveDish] = useState<Dish | null>(null);
+  const discoverScrollRef = useRef<ScrollView>(null);
   // Results sub-tab (Near Me default → Top Rated), shared across category + dish views.
   const [sortMode, setSortMode] = useState<SortMode>('near');
 
@@ -223,6 +224,12 @@ export default function ExploreScreen() {
   useEffect(() => {
     if (dishName) openDishByName(dishName);
   }, [dishName, openDishByName]);
+
+  // Always start a category/dish drill-in (or home) at the top — otherwise the
+  // Discover ScrollView keeps the previous scroll offset.
+  useEffect(() => {
+    discoverScrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [view, activeCat?.key, activeDish?.id, activeDish?.name]);
 
   const goHome = () => {
     setView('home');
@@ -434,7 +441,7 @@ export default function ExploreScreen() {
         />
       ) : (
         // ── Discover tab ──
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: spacing[24] }}>
+        <ScrollView ref={discoverScrollRef} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: spacing[24] }}>
           {view === 'home' && (
             <>
               {/* City selector */}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Modal, ScrollView,
 } from 'react-native';
@@ -35,6 +35,12 @@ export default function LeaderboardScreen() {
   const [scope, setScope] = useState<Scope>('city');
   const [period, setPeriod] = useState<LeaderboardPeriod>('alltime');
   const [city, setCity] = useState(profile?.city ?? selectedCity ?? 'Kuala Lumpur');
+  // Default to the user's own city once the profile loads (it's often null on
+  // first render), unless they've manually picked a different city.
+  const cityPickedRef = useRef(false);
+  useEffect(() => {
+    if (!cityPickedRef.current && profile?.city) setCity(profile.city);
+  }, [profile?.city]);
   const [picker, setPicker] = useState<null | 'city' | 'period'>(null);
 
   const school = profile?.school ?? null;
@@ -220,7 +226,7 @@ export default function LeaderboardScreen() {
             <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false}>
               {picker === 'city'
                 ? ['All Cities', ...MALAYSIA_CITIES].map(c => (
-                    <PickerRow key={c} label={c} selected={c === city} onPress={() => { setCity(c); setPicker(null); }} />
+                    <PickerRow key={c} label={c} selected={c === city} onPress={() => { cityPickedRef.current = true; setCity(c); setPicker(null); }} />
                   ))
                 : PERIODS.map(p => (
                     <PickerRow key={p.key} label={p.label} selected={p.key === period} onPress={() => { setPeriod(p.key); setPicker(null); }} />

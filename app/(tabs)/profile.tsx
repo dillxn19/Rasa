@@ -682,12 +682,15 @@ export default function ProfileScreen() {
                 onPress={() => { setShowSettings(false); router.push('/referrals'); }}
               />
             )}
-            <SettingsItem
-              icon="logo-google"
-              label={googleLinked ? 'Google connected' : 'Connect Google account'}
-              sublabel={googleLinked ? 'You can sign in with Google' : 'Add Google sign-in to this account'}
-              onPress={handleLinkGoogle}
-            />
+            {/* Only offer this when NOT already linked to Google. */}
+            {!googleLinked && (
+              <SettingsItem
+                icon="logo-google"
+                label="Connect Google account"
+                sublabel="Add Google sign-in to this account"
+                onPress={handleLinkGoogle}
+              />
+            )}
             <SettingsItem
               icon="help-buoy-outline"
               label="Contact Us"

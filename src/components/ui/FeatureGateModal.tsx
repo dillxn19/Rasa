@@ -27,10 +27,19 @@ export function FeatureGateModal({
   onUnlockWithReferral: (feature: FeatureDef) => void;
   onInvite: () => void;
 }) {
+  const [confirm, setConfirm] = React.useState<null | 'coins' | 'referral'>(null);
+  React.useEffect(() => { setConfirm(null); }, [feature?.id]);
   if (!feature) return null;
 
   const hasCredit = referralCredits >= 1;
   const canBuy = feature.coinCost != null && coins >= feature.coinCost;
+
+  const runConfirmed = () => {
+    const method = confirm;
+    setConfirm(null);
+    if (method === 'coins') onUnlockWithCoins(feature);
+    else if (method === 'referral') onUnlockWithReferral(feature);
+  };
 
   return (
     <Modal transparent visible animationType="fade" onRequestClose={onClose}>
@@ -48,61 +57,84 @@ export function FeatureGateModal({
             {feature.description}
           </Caption>
 
-          {/* Referral path — spend a credit if you have one, else invite */}
-          {hasCredit ? (
-            <TouchableOpacity style={styles.pathBtn} onPress={() => onUnlockWithReferral(feature)} activeOpacity={0.9}>
-              <Ionicons name="gift" size={18} color={colors.white} />
-              <RText variant="titleSmall" color={colors.white} style={{ marginLeft: spacing[2] }}>
-                Use 1 referral to unlock
+          {confirm ? (
+            /* Confirmation step — nothing is charged until "Yes, unlock" */
+            <View style={{ width: '100%' }}>
+              <RText align="center" color={colors.textPrimary} style={{ marginTop: spacing[5] }}>
+                {confirm === 'coins'
+                  ? `Spend ${feature.coinCost?.toLocaleString()} 🪙 to unlock ${feature.name}?`
+                  : `Use 1 referral credit to unlock ${feature.name}?`}
               </RText>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity style={styles.pathBtn} onPress={onInvite} activeOpacity={0.9}>
-              <Ionicons name="people" size={18} color={colors.white} />
-              <RText variant="titleSmall" color={colors.white} style={{ marginLeft: spacing[2] }}>
-                Invite a friend to unlock — free
-              </RText>
-            </TouchableOpacity>
-          )}
-          {hasCredit && (
-            <Caption align="center" color={colors.textTertiary} style={{ marginTop: spacing[2] }}>
-              You have {referralCredits} referral {referralCredits === 1 ? 'credit' : 'credits'} to spend
-            </Caption>
-          )}
-
-          {/* Coin path (dual-track only) */}
-          {feature.coinCost != null ? (
-            <>
-              <View style={styles.orRow}>
-                <View style={styles.orLine} />
-                <Caption color={colors.textTertiary} style={{ marginHorizontal: spacing[3] }}>or</Caption>
-                <View style={styles.orLine} />
-              </View>
-              <TouchableOpacity
-                style={[styles.coinBtn, !canBuy && { opacity: 0.5 }]}
-                onPress={() => canBuy && onUnlockWithCoins(feature)}
-                disabled={!canBuy}
-                activeOpacity={0.9}
-              >
-                <RText variant="titleSmall" color={colors.accentDark}>
-                  🪙 Unlock for {feature.coinCost}
-                </RText>
+              <Caption align="center" color={colors.textTertiary} style={{ marginTop: spacing[1], marginBottom: spacing[3] }}>
+                This can’t be undone.
+              </Caption>
+              <TouchableOpacity style={styles.pathBtn} onPress={runConfirmed} activeOpacity={0.9}>
+                <Ionicons name="checkmark-circle" size={18} color={colors.white} />
+                <RText variant="titleSmall" color={colors.white} style={{ marginLeft: spacing[2] }}>Yes, unlock</RText>
               </TouchableOpacity>
-              {!canBuy && (
+              <TouchableOpacity onPress={() => setConfirm(null)} style={{ marginTop: spacing[3] }}>
+                <RText variant="labelMedium" color={colors.textSecondary} align="center">Cancel</RText>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              {/* Referral path — spend a credit if you have one, else invite */}
+              {hasCredit ? (
+                <TouchableOpacity style={styles.pathBtn} onPress={() => setConfirm('referral')} activeOpacity={0.9}>
+                  <Ionicons name="gift" size={18} color={colors.white} />
+                  <RText variant="titleSmall" color={colors.white} style={{ marginLeft: spacing[2] }}>
+                    Use 1 referral to unlock
+                  </RText>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={styles.pathBtn} onPress={onInvite} activeOpacity={0.9}>
+                  <Ionicons name="people" size={18} color={colors.white} />
+                  <RText variant="titleSmall" color={colors.white} style={{ marginLeft: spacing[2] }}>
+                    Invite a friend to unlock — free
+                  </RText>
+                </TouchableOpacity>
+              )}
+              {hasCredit && (
                 <Caption align="center" color={colors.textTertiary} style={{ marginTop: spacing[2] }}>
-                  You have {coins.toLocaleString()} 🪙
+                  You have {referralCredits} referral {referralCredits === 1 ? 'credit' : 'credits'} to spend
                 </Caption>
               )}
-            </>
-          ) : (
-            <Caption align="center" color={colors.textTertiary} style={{ marginTop: spacing[3] }}>
-              Referral-only feature — invite friends to unlock it.
-            </Caption>
-          )}
 
-          <TouchableOpacity onPress={onClose} style={{ marginTop: spacing[4] }}>
-            <RText variant="labelMedium" color={colors.textSecondary}>Maybe later</RText>
-          </TouchableOpacity>
+              {/* Coin path (dual-track only) */}
+              {feature.coinCost != null ? (
+                <>
+                  <View style={styles.orRow}>
+                    <View style={styles.orLine} />
+                    <Caption color={colors.textTertiary} style={{ marginHorizontal: spacing[3] }}>or</Caption>
+                    <View style={styles.orLine} />
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.coinBtn, !canBuy && { opacity: 0.5 }]}
+                    onPress={() => canBuy && setConfirm('coins')}
+                    disabled={!canBuy}
+                    activeOpacity={0.9}
+                  >
+                    <RText variant="titleSmall" color={colors.accentDark}>
+                      🪙 Unlock for {feature.coinCost.toLocaleString()}
+                    </RText>
+                  </TouchableOpacity>
+                  {!canBuy && (
+                    <Caption align="center" color={colors.textTertiary} style={{ marginTop: spacing[2] }}>
+                      You have {coins.toLocaleString()} 🪙
+                    </Caption>
+                  )}
+                </>
+              ) : (
+                <Caption align="center" color={colors.textTertiary} style={{ marginTop: spacing[3] }}>
+                  Referral-only feature — invite friends to unlock it.
+                </Caption>
+              )}
+
+              <TouchableOpacity onPress={onClose} style={{ marginTop: spacing[4] }}>
+                <RText variant="labelMedium" color={colors.textSecondary}>Maybe later</RText>
+              </TouchableOpacity>
+            </>
+          )}
         </TouchableOpacity>
       </TouchableOpacity>
     </Modal>
